@@ -1,24 +1,25 @@
-"use client"
+// app/page.tsx
+'use client'
 
-import { useEffect, useState } from "react";
-
-type ApiResponse = {
-  message: string;
-};
+import Link from 'next/link';
 
 export default function Home() {
-  const [data, setData] = useState<ApiResponse | null>(null);
-
-  useEffect(() => {
-    fetch("/api/hello")
-      .then((response) => response.json())
-      .then((data: ApiResponse) => setData(data)); 
-  }, []);
-
   return (
-    <div>
-      <h1>Next.js Frontend</h1>
-      <p>{data ? data.message : "Loading..."}</p>
+    <div style={{ textAlign: 'center', padding: '50px' }}>
+      <h1>Welcome to the Jackbox Clone</h1>
+      <p>Start or join a game</p>
+      <div>
+        <Link href="/create">
+          <button style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
+            Create a New Game
+          </button>
+        </Link>
+        <Link href="/join">
+          <button style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
+            Join an Existing Game
+          </button>
+        </Link>
+      </div>
     </div>
   );
 }
