@@ -1,25 +1,26 @@
-// app/page.tsx
-'use client'
+"use client"
 
-import Link from 'next/link';
+import { useState } from "react"
+import CreateGame from "@/components/create-game"
+import JoinGame from "@/components/join-game"
+import { Button } from "@/components/ui/button"
 
 export default function Home() {
+  const [activeComponent, setActiveComponent] = useState<"create" | "join" | null>(null)
+
   return (
-    <div style={{ textAlign: 'center', padding: '50px' }}>
-      <h1>Welcome to the Jackbox Clone</h1>
-      <p>Start or join a game</p>
-      <div>
-        <Link href="/create">
-          <button style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
-            Create a New Game
-          </button>
-        </Link>
-        <Link href="/join">
-          <button style={{ margin: '10px', padding: '10px 20px', fontSize: '16px' }}>
-            Join an Existing Game
-          </button>
-        </Link>
-      </div>
+    <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center">
+      <h1 className="text-4xl font-bold mb-8">Welcome to Skoobl!</h1>
+      {activeComponent === null ? (
+        <div className="space-x-4">
+          <Button onClick={() => setActiveComponent("create")}>Create a New Game</Button>
+          <Button onClick={() => setActiveComponent("join")}>Join an Existing Game</Button>
+        </div>
+      ) : activeComponent === "create" ? (
+        <CreateGame onBack={() => setActiveComponent(null)} />
+      ) : (
+        <JoinGame onBack={() => setActiveComponent(null)} />
+      )}
     </div>
-  );
+  )
 }

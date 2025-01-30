@@ -9,19 +9,24 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/gorilla/handlers"
+	"github.com/gorilla/websocket"
 )
 
 var (
-	games       sync.Map
-	upgrader    = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }} // Allow connections from any origin
-	gameClients = sync.Map{} // Map to hold WebSocket connections for each game code
+	games       sync.Map // Stores game state for each game code
+	upgrader    = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	gameClients = sync.Map{} // 🔥 Map storing WebSocket connections per game
 )
 
-// GenerateGameCode generates a unique 6-character game code
+type GameState struct {
+	Players []string `json:"players"`
+	Host    string   `json:"host"`
+}
+
+// 🔹 Generates a unique 6-character game code
 func GenerateGameCode() string {
-	bytes := make([]byte, 3) // 3 bytes = 6 hex characters
+	bytes := make([]byte, 3)
 	_, err := rand.Read(bytes)
 	if err != nil {
 		panic(err)
@@ -29,103 +34,174 @@ func GenerateGameCode() string {
 	return hex.EncodeToString(bytes)
 }
 
-// CreateGame creates a new game and returns the game code
-func CreateGame(w http.ResponseWriter, r *http.Request) {
-	code := GenerateGameCode()
-	games.Store(code, map[string]interface{}{"players": []string{}})
-	fmt.Fprintf(w, "Game code: %s", code)
+// 🔹 Broadcasts message to ALL WebSocket clients in a game
+func BroadcastToGame(gameCode string, message interface{}) {
+	if clients, ok := gameClients.Load(gameCode); ok {
+		clientList := clients.([]*websocket.Conn)
+
+		for _, conn := range clientList {
+			if err := conn.WriteJSON(message); err != nil {
+				log.Printf("Error broadcasting to client: %v", err)
+				conn.Close()
+			}
+		}
+	}
 }
 
-// Handle WebSocket connections for the game
-func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Get the game code from the query parameters
-	code := r.URL.Query().Get("code")
+// 🔹 Creates a new game
+func CreateGame(w http.ResponseWriter, r *http.Request) {
+	code := GenerateGameCode()
+	gameState := GameState{
+		Players: []string{},
+		Host:    "", // Will be set when host connects
+	}
+	games.Store(code, gameState)
 
-	// Upgrade the HTTP connection to a WebSocket connection
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("WebSocket upgrade failed:", err)
+	// 🔥 Initialize empty WebSocket client list for this game
+	gameClients.Store(code, []*websocket.Conn{})
+
+	fmt.Fprintf(w, "Game Code: %s", code)
+}
+
+// 🔹 Adds a player to the game
+func JoinGame(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	playerName := r.URL.Query().Get("player")
+
+	gameInterface, exists := games.Load(code)
+	if !exists {
+		http.Error(w, "Game not found", http.StatusNotFound)
 		return
 	}
-	defer conn.Close()
 
-	// Add the new connection to the gameClients map
-	gameClients.Store(code, conn)
+	gameState, ok := gameInterface.(GameState)
+	if !ok {
+		http.Error(w, "Invalid game state", http.StatusInternalServerError)
+		return
+	}
 
-	// Send the initial player list to the new client
-	game, ok := games.Load(code)
-	if ok {
-		players := game.(map[string]interface{})["players"].([]string)
-		err := conn.WriteJSON(players)
-		if err != nil {
-			log.Println("Error sending initial player list:", err)
+	// Prevent duplicate player names
+	for _, existingPlayer := range gameState.Players {
+		if existingPlayer == playerName {
+			http.Error(w, "Player name already taken", http.StatusConflict)
 			return
 		}
 	}
 
-	// Wait for new players to join and send updates to all clients
+	// ✅ Add player and update game state
+	gameState.Players = append(gameState.Players, playerName)
+	games.Store(code, gameState)
+
+	// 🔥 Broadcast updated player list to ALL WebSocket clients
+	BroadcastToGame(code, gameState)
+
+	// ✅ Send response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(gameState.Players)
+}
+
+// 🔹 Deletes a game and kicks everyone out
+func DeleteGame(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+
+	// ✅ Check if game exists
+	if _, exists := games.Load(code); !exists {
+		http.Error(w, "Game not found", http.StatusNotFound)
+		return
+	}
+
+	// 🔥 Broadcast "game-ended" message
+	BroadcastToGame(code, map[string]string{"type": "game-ended"})
+
+	// 🔹 Remove game and WebSocket clients
+	games.Delete(code)
+	gameClients.Delete(code)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// 🔹 Manages WebSocket connections
+func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	playerName := r.URL.Query().Get("player")
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// 🔹 Add WebSocket connection to game
+	if clients, ok := gameClients.Load(code); ok {
+		clientList := clients.([]*websocket.Conn)
+		gameClients.Store(code, append(clientList, conn))
+	}
+
+	// 🔹 Send initial game state
+	if gameInterface, exists := games.Load(code); exists {
+		gameState, ok := gameInterface.(GameState)
+		if ok {
+			if err := conn.WriteJSON(gameState); err != nil {
+				log.Printf("Error sending initial state: %v", err)
+				return
+			}
+		}
+	}
+
+	// 🔹 Handle WebSocket disconnect
 	for {
-		_, _, err := conn.ReadMessage() // Wait for a message (this just keeps the connection alive)
+		_, _, err := conn.ReadMessage()
 		if err != nil {
-			log.Println("Error reading message:", err)
-			gameClients.Delete(code)
+			log.Printf("WebSocket read error: %v", err)
+
+			// 🔥 Remove connection from client list
+			if clients, ok := gameClients.Load(code); ok {
+				clientList := clients.([]*websocket.Conn)
+				for i, c := range clientList {
+					if c == conn {
+						clientList = append(clientList[:i], clientList[i+1:]...)
+						break
+					}
+				}
+				gameClients.Store(code, clientList)
+			}
+
+			// 🔹 Remove player from game state
+			if gameInterface, exists := games.Load(code); exists {
+				gameState, ok := gameInterface.(GameState)
+				if ok {
+					for i, player := range gameState.Players {
+						if player == playerName {
+							gameState.Players = append(gameState.Players[:i], gameState.Players[i+1:]...)
+							break
+						}
+					}
+					games.Store(code, gameState)
+
+					// 🔥 Broadcast updated player list
+					BroadcastToGame(code, gameState)
+				}
+			}
 			break
 		}
 	}
 }
 
-// JoinGame adds a player to the game and broadcasts the updated list of players to all clients
-func JoinGame(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	playerName := r.URL.Query().Get("player")
-
-	// Check if game exists
-	game, ok := games.Load(code)
-	if !ok {
-		http.Error(w, "Game not found", http.StatusNotFound)
-		return
-	}
-
-	// Add player to the game
-	gameState := game.(map[string]interface{})
-	players := gameState["players"].([]string)
-	players = append(players, playerName)
-	gameState["players"] = players
-
-	// Save the updated game state
-	games.Store(code, gameState)
-
-	// Broadcast the updated player list to all connected clients
-	gameClients.Range(func(key, value interface{}) bool {
-		conn := value.(*websocket.Conn)
-		err := conn.WriteJSON(players) // Send the updated player list to each client
-		if err != nil {
-			log.Println("Error sending player list update:", err)
-			conn.Close()
-			gameClients.Delete(key)
-		}
-		return true
-	})
-
-	// Respond with the updated list of players as JSON
-	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(players)
-	if err != nil {
-		http.Error(w, "Failed to encode players", http.StatusInternalServerError)
-	}
-}
-
 func main() {
 	// CORS configuration
-	headers := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type"})
+	headers := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Authorization"})
 	origins := handlers.AllowedOrigins([]string{"*"})
-	methods := handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"})
+	methods := handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"})
 
+	// Register handlers
 	http.HandleFunc("/create-game", CreateGame)
 	http.HandleFunc("/join-game", JoinGame)
-	http.HandleFunc("/ws", HandleWebSocket) // WebSocket endpoint for real-time updates
+	http.HandleFunc("/ws", HandleWebSocket)
+	http.HandleFunc("/delete-game", DeleteGame)
 
-	// Apply CORS middleware
-	log.Println("Starting server on port 8080")
-	http.ListenAndServe(":8080", handlers.CORS(origins, headers, methods)(http.DefaultServeMux))
+	// Start server
+	port := ":8080"
+	log.Printf("Starting server on port %s", port)
+	log.Fatal(http.ListenAndServe(port, handlers.CORS(origins, headers, methods)(http.DefaultServeMux)))
 }
