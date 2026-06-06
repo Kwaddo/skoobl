@@ -1,0 +1,7 @@
+# Local env (keep .env.example tracked)
+.env
+.env.local
+
+# Build output
+/server
+/skoobl
