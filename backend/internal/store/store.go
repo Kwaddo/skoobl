@@ -40,6 +40,12 @@ func (s *RedisStore) LoadSnapshot(ctx context.Context, code string) (data []byte
 	return b, true, nil
 }
 
+// DeleteSnapshot removes a room's stored state (used when a room is reaped so it
+// won't be rehydrated on a later Lookup).
+func (s *RedisStore) DeleteSnapshot(ctx context.Context, code string) error {
+	return s.client.Del(ctx, snapshotKey(code)).Err()
+}
+
 // Publish broadcasts an event to other instances watching this room.
 func (s *RedisStore) Publish(ctx context.Context, code string, data []byte) error {
 	return s.client.Publish(ctx, roomChannel(code), data).Err()

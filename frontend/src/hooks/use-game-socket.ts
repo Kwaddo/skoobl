@@ -1,68 +1,53 @@
 import { useCallback, useEffect, useRef } from "react";
-import { cmd, type Envelope, type GameState } from "@/lib/protocol";
+import { io, type Socket } from "socket.io-client";
+import { SOCKET_URL } from "@/lib/config";
+import type { GameState, ServerError } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 
-// Prefer an explicit override (dev). Otherwise derive from the page origin so
-// the static build is host-agnostic: https→wss, http→ws, same host, /ws path.
-function defaultWsBase(): string {
-  if (typeof window === "undefined") return "ws://localhost:8080/ws";
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws`;
-}
-const WS_BASE = import.meta.env.VITE_WS_BASE ?? defaultWsBase();
-const MAX_BACKOFF = 5000;
-
-export function useGameSocket(code: string, player: string) {
-  const wsRef = useRef<WebSocket | null>(null);
-  const backoff = useRef(500);
-  const closedRef = useRef(false);
-
-  const send = useCallback((env: Envelope) => {
-    const ws = wsRef.current;
-    // 1 === WebSocket.OPEN; use the literal so test mocks without static
-    // readyState constants still report the socket as open.
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify(env));
-    }
-  }, []);
+// useGameSocket connects to the room over Socket.IO, joins as `name`, and feeds
+// every "state" broadcast into the store. Socket.IO handles reconnection and
+// transport negotiation, so there's no manual backoff here.
+export function useGameSocket(code: string, name: string) {
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    if (!code || !player) return;
-    closedRef.current = false;
-    useGameStore.getState().setSelf(player);
+    if (!code || !name) return;
 
-    const connect = () => {
-      const ws = new WebSocket(`${WS_BASE}?code=${encodeURIComponent(code)}`);
-      wsRef.current = ws;
+    useGameStore.getState().reset();
+    useGameStore.getState().setSelf(name);
 
-      ws.onopen = () => {
-        backoff.current = 500;
-        ws.send(JSON.stringify(cmd.join(player)));
-      };
-      ws.onmessage = (e) => {
-        const env = JSON.parse(e.data) as Envelope;
-        if (env.type === "state") {
-          useGameStore.getState().applyState(env.payload as GameState);
-        } else if (env.type === "error") {
-          useGameStore
-            .getState()
-            .setError((env.payload as { message: string }).message);
-        }
-      };
-      ws.onclose = () => {
-        if (closedRef.current) return;
-        const delay = backoff.current;
-        backoff.current = Math.min(delay * 2, MAX_BACKOFF);
-        setTimeout(connect, delay);
-      };
-    };
+    const socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
+    socketRef.current = socket;
 
-    connect();
+    socket.on("connect", () => {
+      useGameStore.getState().setError(null);
+      socket.emit("join", { code, name });
+    });
+    socket.on("state", (s: GameState) => useGameStore.getState().applyState(s));
+    socket.on("error", (e: ServerError) =>
+      useGameStore.getState().setError(e.message),
+    );
+    socket.on("connect_error", () =>
+      useGameStore.getState().setError("Can't reach the server — retrying…"),
+    );
+
     return () => {
-      closedRef.current = true;
-      wsRef.current?.close();
+      socket.removeAllListeners();
+      socket.disconnect();
+      socketRef.current = null;
     };
-  }, [code, player]);
+  }, [code, name]);
 
-  return { send };
+  const emit = useCallback((event: string, payload?: unknown) => {
+    socketRef.current?.emit(event, payload);
+  }, []);
+
+  return {
+    start: useCallback(() => emit("start"), [emit]),
+    nextPhase: useCallback(() => emit("nextPhase"), [emit]),
+    submitAnswer: useCallback(
+      (answer: string) => emit("submitAnswer", { answer }),
+      [emit],
+    ),
+  };
 }

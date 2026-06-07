@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -68,51 +69,6 @@ func TestRoomJoinAndStart(t *testing.T) {
 	}
 }
 
-func TestRoomUnsubscribeStopsBroadcasts(t *testing.T) {
-	r := NewRoom("unsub01")
-	go r.Run()
-	defer r.Stop()
-
-	stay := make(chan GameState, 8)
-	gone := make(chan GameState, 8)
-	r.Submit(Command{Kind: CmdJoin, Player: "alice", Subscribe: stay})
-	nextState(t, stay)
-
-	// Subscribe gone and block-read its broadcast: because the room is a single
-	// goroutine processing commands in order, once gone has received the
-	// bob-join broadcast, that broadcast has also already been delivered to
-	// stay. Drain stay afterward so its next read reflects only future state.
-	r.Submit(Command{Kind: CmdJoin, Player: "bob", Subscribe: gone})
-	nextState(t, gone)
-	drain(stay)
-	drain(gone)
-
-	// Unsubscribe the second channel.
-	r.Submit(Command{Kind: CmdUnsubscribe, Unsub: gone})
-
-	// Trigger a state change. Only the remaining channel should receive it.
-	// The unsubscribe itself also broadcasts the (still 2-player) state to the
-	// remaining channel, so read until we observe carol's join.
-	r.Submit(Command{Kind: CmdJoin, Player: "carol", Subscribe: nil})
-	var s GameState
-	for i := 0; i < 4; i++ {
-		s = nextState(t, stay)
-		if len(s.Players) == 3 {
-			break
-		}
-	}
-	if len(s.Players) != 3 {
-		t.Fatalf("players = %d, want 3 on remaining channel", len(s.Players))
-	}
-
-	select {
-	case s := <-gone:
-		t.Fatalf("unsubscribed channel still received broadcast: %+v", s)
-	case <-time.After(200 * time.Millisecond):
-		// expected: nothing arrives on the unsubscribed channel
-	}
-}
-
 func TestRoomSubmitAnswerOnlyInRound(t *testing.T) {
 	r := NewRoom("xyz789")
 	go r.Run()
@@ -164,7 +120,7 @@ func (f *fakeSnap) last(code string) ([]byte, bool) {
 
 func TestRoomPersistsAfterStateChange(t *testing.T) {
 	snap := newFakeSnap()
-	r := NewRoomWithStore("persist1", snap)
+	r := NewRoom("persist1", WithSnapshotter(snap))
 	go r.Run()
 	defer r.Stop()
 
@@ -200,7 +156,7 @@ func TestNewRoomFromSnapshotRestoresState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	r, err := NewRoomFromSnapshot("restore1", data, nil)
+	r, err := NewRoomFromSnapshot("restore1", data)
 	if err != nil {
 		t.Fatalf("NewRoomFromSnapshot: %v", err)
 	}
@@ -226,4 +182,206 @@ func TestNilSnapshotterDoesNotPanic(t *testing.T) {
 	sub := make(chan GameState, 8)
 	r.Submit(Command{Kind: CmdJoin, Player: "alice", Subscribe: sub})
 	nextState(t, sub) // would panic on persist if nil not guarded
+}
+
+// joinOK submits a join and asserts the room accepts it (empty ack).
+func joinOK(t *testing.T, r *Room, name string, sub chan GameState) {
+	t.Helper()
+	ack := make(chan string, 1)
+	r.Submit(Command{Kind: CmdJoin, Player: name, Subscribe: sub, Ack: ack})
+	select {
+	case msg := <-ack:
+		if msg != "" {
+			t.Fatalf("join %q rejected: %q", name, msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("join %q: no ack", name)
+	}
+}
+
+// joinErr submits a join and returns the rejection message ("" means accepted).
+func joinErr(t *testing.T, r *Room, name string, sub chan GameState) string {
+	t.Helper()
+	ack := make(chan string, 1)
+	r.Submit(Command{Kind: CmdJoin, Player: name, Subscribe: sub, Ack: ack})
+	select {
+	case msg := <-ack:
+		return msg
+	case <-time.After(time.Second):
+		t.Fatal("join: no ack")
+		return ""
+	}
+}
+
+// poke forces a broadcast (a no-op command still broadcasts) and returns state.
+func poke(t *testing.T, r *Room, sub chan GameState) GameState {
+	t.Helper()
+	drain(sub)
+	r.Submit(Command{Kind: CmdStart, Player: "\x00nobody"}) // not host → no change
+	return nextState(t, sub)
+}
+
+func TestReconnectKeepsPlayer(t *testing.T) {
+	r := NewRoom("recon1", WithGrace(20*time.Millisecond))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinOK(t, r, "alice", sub)
+	joinOK(t, r, "bob", make(chan GameState, 16)) // keep room non-empty
+
+	r.Submit(Command{Kind: CmdDisconnect, Player: "alice", Unsub: sub})
+	sub2 := make(chan GameState, 16)
+	joinOK(t, r, "alice", sub2) // reconnect before grace
+	time.Sleep(50 * time.Millisecond)
+
+	s := poke(t, r, sub2)
+	if s.playerIndex("alice") < 0 {
+		t.Fatalf("alice pruned despite reconnect: %+v", s.Players)
+	}
+}
+
+func TestPruneAfterGrace(t *testing.T) {
+	r := NewRoom("prune1", WithGrace(20*time.Millisecond))
+	go r.Run()
+	defer r.Stop()
+
+	subA := make(chan GameState, 16)
+	joinOK(t, r, "alice", subA)
+	subB := make(chan GameState, 16)
+	joinOK(t, r, "bob", subB)
+
+	r.Submit(Command{Kind: CmdDisconnect, Player: "bob", Unsub: subB})
+	time.Sleep(60 * time.Millisecond)
+
+	s := poke(t, r, subA)
+	if s.playerIndex("bob") >= 0 {
+		t.Fatalf("bob not pruned after grace: %+v", s.Players)
+	}
+	if s.playerIndex("alice") < 0 {
+		t.Fatal("alice wrongly removed")
+	}
+}
+
+func TestHostPromotionOnPrune(t *testing.T) {
+	r := NewRoom("promo1", WithGrace(20*time.Millisecond))
+	go r.Run()
+	defer r.Stop()
+
+	subA := make(chan GameState, 16)
+	joinOK(t, r, "alice", subA) // alice becomes host
+	subB := make(chan GameState, 16)
+	joinOK(t, r, "bob", subB)
+
+	r.Submit(Command{Kind: CmdDisconnect, Player: "alice", Unsub: subA})
+	time.Sleep(60 * time.Millisecond)
+
+	s := poke(t, r, subB)
+	if s.Host != "bob" {
+		t.Fatalf("host = %q, want bob after alice pruned", s.Host)
+	}
+}
+
+func TestDuplicateNameRejected(t *testing.T) {
+	r := NewRoom("dup1", WithGrace(time.Second))
+	go r.Run()
+	defer r.Stop()
+
+	joinOK(t, r, "alice", make(chan GameState, 16))
+	if msg := joinErr(t, r, "alice", make(chan GameState, 16)); msg == "" {
+		t.Fatal("duplicate connected name was accepted")
+	}
+}
+
+func TestRoomCap(t *testing.T) {
+	r := NewRoom("cap1", WithGrace(time.Second))
+	go r.Run()
+	defer r.Stop()
+
+	for i := 0; i < maxPlayers; i++ {
+		joinOK(t, r, fmt.Sprintf("p%d", i), make(chan GameState, 16))
+	}
+	if msg := joinErr(t, r, "overflow", make(chan GameState, 16)); msg == "" {
+		t.Fatalf("join past cap of %d was accepted", maxPlayers)
+	}
+}
+
+func TestJoinRejectedWhenEnded(t *testing.T) {
+	data, _ := json.Marshal(GameState{Code: "end1", Phase: PhaseEnded,
+		Host: "alice", Players: []Player{{Name: "alice"}}})
+	r, err := NewRoomFromSnapshot("end1", data, WithGrace(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	go r.Run()
+	defer r.Stop()
+
+	if msg := joinErr(t, r, "bob", make(chan GameState, 16)); msg == "" {
+		t.Fatal("join into an ended game was accepted")
+	}
+}
+
+func TestEmptyRoomReapedOnCreationGrace(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("empty1", WithGrace(20*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("never-populated room was not reaped")
+	}
+}
+
+func TestRoomReapedAfterLastPlayerLeaves(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("empty2", WithGrace(20*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinOK(t, r, "alice", sub) // cancels the creation timer
+	r.Submit(Command{Kind: CmdDisconnect, Player: "alice", Unsub: sub})
+
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped after last player left + grace")
+	}
+}
+
+func TestDisconnectStopsBroadcasts(t *testing.T) {
+	r := NewRoom("unsub01", WithGrace(time.Second))
+	go r.Run()
+	defer r.Stop()
+
+	stay := make(chan GameState, 16)
+	joinOK(t, r, "alice", stay)
+	gone := make(chan GameState, 16)
+	joinOK(t, r, "bob", gone)
+	drain(stay)
+	drain(gone)
+
+	// bob drops: gone is unsubscribed (bob stays present during the 1s grace).
+	r.Submit(Command{Kind: CmdDisconnect, Player: "bob", Unsub: gone})
+	joinOK(t, r, "carol", nil)
+
+	var s GameState
+	for i := 0; i < 5; i++ {
+		s = nextState(t, stay)
+		if s.playerIndex("carol") >= 0 {
+			break
+		}
+	}
+	if s.playerIndex("carol") < 0 {
+		t.Fatal("remaining channel did not receive carol join")
+	}
+	select {
+	case x := <-gone:
+		t.Fatalf("unsubscribed channel still received: %+v", x)
+	case <-time.After(150 * time.Millisecond):
+	}
 }

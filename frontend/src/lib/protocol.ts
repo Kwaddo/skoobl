@@ -1,4 +1,6 @@
-// Mirrors backend/internal/protocol and internal/game state types.
+// Mirrors backend/internal/game state types. With Socket.IO the client emits
+// named events (join, start, nextPhase, submitAnswer) and receives "state" /
+// "error", so no envelope wrapper is needed.
 export type Phase = "lobby" | "inRound" | "reveal" | "ended";
 
 export interface Player {
@@ -13,26 +15,6 @@ export interface GameState {
   players: Player[];
 }
 
-export type CommandType =
-  | "join"
-  | "leave"
-  | "start"
-  | "submitAnswer"
-  | "nextPhase";
-
-export type EventType = "state" | "error" | "gameEnded";
-
-export interface Envelope<T = unknown> {
-  type: CommandType | EventType;
-  payload?: T;
+export interface ServerError {
+  message: string;
 }
-
-export const cmd = {
-  join: (player: string): Envelope => ({ type: "join", payload: { player } }),
-  start: (): Envelope => ({ type: "start" }),
-  nextPhase: (): Envelope => ({ type: "nextPhase" }),
-  submitAnswer: (answer: string): Envelope => ({
-    type: "submitAnswer",
-    payload: { answer },
-  }),
-};
