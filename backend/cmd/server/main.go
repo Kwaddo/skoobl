@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"skoobl/internal/hub"
+	"skoobl/internal/realtime"
 	"skoobl/internal/router"
 	"skoobl/internal/store"
 )
@@ -28,8 +28,6 @@ func main() {
 		}
 		os.Exit(0)
 	}
-
-	allowedOrigins := splitEnv(os.Getenv("ALLOWED_ORIGINS"))
 
 	var (
 		h           *hub.Hub
@@ -51,9 +49,11 @@ func main() {
 		log.Print("redis not configured; running in-memory")
 	}
 
+	io := realtime.NewServer(h)
+
 	srv := &http.Server{
 		Addr:    ":8080",
-		Handler: router.New(h, allowedOrigins),
+		Handler: router.New(h, io),
 	}
 
 	go func() {
@@ -72,6 +72,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
 	}
+	h.StopAll()
+	io.Close(nil)
 	if redisClient != nil {
 		if err := redisClient.Close(); err != nil {
 			log.Printf("redis close failed: %v", err)
@@ -89,18 +91,4 @@ func snapshotTTL() time.Duration {
 		log.Printf("invalid SNAPSHOT_TTL %q; using 1h", v)
 	}
 	return time.Hour
-}
-
-// splitEnv parses a comma-separated list, trimming spaces and empties.
-func splitEnv(v string) []string {
-	if v == "" {
-		return nil
-	}
-	var out []string
-	for _, p := range strings.Split(v, ",") {
-		if s := strings.TrimSpace(p); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
 }

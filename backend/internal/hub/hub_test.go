@@ -50,11 +50,14 @@ func TestConcurrentCreate(t *testing.T) {
 
 // fakeStore is an in-memory hub.Store for tests.
 type fakeStore struct {
-	mu   sync.Mutex
-	data map[string][]byte
+	mu      sync.Mutex
+	data    map[string][]byte
+	deletes map[string]bool
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{data: map[string][]byte{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{data: map[string][]byte{}, deletes: map[string]bool{}}
+}
 
 func (f *fakeStore) SaveSnapshot(_ context.Context, code string, data []byte) error {
 	f.mu.Lock()
@@ -68,6 +71,20 @@ func (f *fakeStore) LoadSnapshot(_ context.Context, code string) ([]byte, bool, 
 	defer f.mu.Unlock()
 	b, ok := f.data[code]
 	return b, ok, nil
+}
+
+func (f *fakeStore) DeleteSnapshot(_ context.Context, code string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.data, code)
+	f.deletes[code] = true
+	return nil
+}
+
+func (f *fakeStore) deleted(code string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deletes[code]
 }
 
 func TestLookupRestoresFromStoreOnMiss(t *testing.T) {
@@ -116,4 +133,62 @@ func TestCreatedRoomsPersist(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("created room never persisted a snapshot")
+}
+
+func TestEmptyRoomReaped(t *testing.T) {
+	store := newFakeStore()
+	h := New(WithStore(store), WithGrace(20*time.Millisecond))
+	code, _ := h.Create() // nobody ever joins
+
+	// After the creation grace, the room reaps itself: gone from the map and its
+	// snapshot deleted so Lookup can't rehydrate it.
+	deadline := time.After(time.Second)
+	for {
+		if _, ok := h.Lookup(code); !ok && store.deleted(code) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("room %s not reaped (lookup or delete missing)", code)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestRestoredRoomReapedIfAbandoned(t *testing.T) {
+	store := newFakeStore()
+	// Seed a snapshot with a player who never reconnects.
+	snap := []byte(`{"code":"aband1","phase":"lobby","host":"alice","players":[{"name":"alice"}]}`)
+	_ = store.SaveSnapshot(context.Background(), "aband1", snap)
+
+	h := New(WithStore(store), WithGrace(20*time.Millisecond))
+	if _, ok := h.Lookup("aband1"); !ok { // restores a running room
+		t.Fatal("Lookup did not restore the seeded room")
+	}
+	// Nobody reconnects → the restored player prunes → room reaps + snapshot deleted.
+	deadline := time.After(time.Second)
+	for {
+		if !store.deleted("aband1") {
+			select {
+			case <-deadline:
+				t.Fatal("abandoned restored room was not reaped/deleted")
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
+		}
+		return
+	}
+}
+
+func TestStopAllStopsRooms(t *testing.T) {
+	h := New(WithGrace(time.Second))
+	c1, _ := h.Create()
+	c2, _ := h.Create()
+	h.StopAll()
+	if _, ok := h.Lookup(c1); ok {
+		t.Fatal("room 1 still present after StopAll")
+	}
+	if _, ok := h.Lookup(c2); ok {
+		t.Fatal("room 2 still present after StopAll")
+	}
 }
