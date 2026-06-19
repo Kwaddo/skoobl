@@ -562,42 +562,41 @@ func (r *Room) advance() {
 
 func (r *Room) beginGuessing() {
 	r.state.Featured = r.pickFeatured()
+	if r.state.Featured == "" {
+		// Nobody drew anything this round — there's nothing to guess, so skip
+		// straight to the reveal (which shows a "nobody drew" message).
+		r.beginReveal()
+		return
+	}
 	r.startPhase(PhaseGuessing, r.state.GuessMs)
 }
 
 // pickFeatured chooses the single artist whose drawing is shown this round. It
-// prefers, in order: a not-yet-featured player who actually drew something, then
-// any not-yet-featured player, then anyone who drew, then anyone — so coverage
-// spreads across rounds without showing a blank canvas when it's avoidable.
+// only ever features a player who actually drew something (a blank canvas can't
+// be guessed), preferring a not-yet-featured drawer so coverage spreads across
+// rounds. Returns "" when nobody drew anything.
 func (r *Room) pickFeatured() string {
-	if len(r.state.Players) == 0 {
-		return ""
-	}
 	past := make(map[string]bool, len(r.state.FeaturedPast))
 	for _, n := range r.state.FeaturedPast {
 		past[n] = true
 	}
-	drew := func(name string) bool { return len(r.state.Drawings[name]) > 0 }
 
-	var freshDrew, fresh, anyDrew, all []string
+	var freshDrew, anyDrew []string
 	for _, p := range r.state.Players {
-		all = append(all, p.Name)
-		if drew(p.Name) {
-			anyDrew = append(anyDrew, p.Name)
+		if len(r.state.Drawings[p.Name]) == 0 {
+			continue // never feature an empty canvas
 		}
+		anyDrew = append(anyDrew, p.Name)
 		if !past[p.Name] {
-			fresh = append(fresh, p.Name)
-			if drew(p.Name) {
-				freshDrew = append(freshDrew, p.Name)
-			}
+			freshDrew = append(freshDrew, p.Name)
 		}
 	}
-	for _, pick := range [][]string{freshDrew, fresh, anyDrew, all} {
+	for _, pick := range [][]string{freshDrew, anyDrew} {
 		if len(pick) > 0 {
 			return pick[rand.IntN(len(pick))]
 		}
 	}
-	return all[rand.IntN(len(all))]
+	return ""
 }
 
 // beginReveal scores the round (each correct guesser earns points) and opens the

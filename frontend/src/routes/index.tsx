@@ -1,7 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { Segmented } from "@/components/Segmented";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { API_BASE } from "@/lib/config";
-import { rememberName } from "@/lib/identity";
+import { takeFlash } from "@/lib/flash";
+import { recallName, rememberName } from "@/lib/identity";
+import { preflightJoin } from "@/lib/preflight";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -9,11 +13,23 @@ export const Route = createFileRoute("/")({
 
 type Tab = "join" | "host";
 
+// The host is just the shared screen, not a player — it doesn't need a nickname.
+// We give it a fixed identity so the backend (which requires a name) is happy.
+const HOST_NAME = "Host";
+
 function Home() {
-  const [tab, setTab] = useState<Tab>("join");
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // If a room route bounced us back (name taken, bad code, …), seed the form
+  // from the one-shot flash so the message shows inline and the fields are
+  // prefilled for a quick retry.
+  const [flash] = useState(takeFlash);
+  const [tab, setTab] = useState<Tab>(flash?.tab ?? "join");
+  // Prefill the player's last name, but never the auto "Host" identity.
+  const [name, setName] = useState(() => {
+    const n = recallName();
+    return n === HOST_NAME ? "" : n;
+  });
+  const [code, setCode] = useState(flash?.code ?? "");
+  const [error, setError] = useState<string | null>(flash?.message ?? null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
 
@@ -21,14 +37,22 @@ function Home() {
   const cleanCode = code.trim().toLowerCase();
 
   const host = async () => {
-    if (!cleanName) return setError("Pick a name before hosting.");
+    // No nickname needed — the host is the screen, not a player.
     setError(null);
     setBusy(true);
     try {
       const res = await fetch(`${API_BASE}/games`, { method: "POST" });
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { code: string };
-      rememberName(cleanName);
+      // Validate the host seat before leaving the form, so any rejection stays
+      // here inline instead of flashing the room screen.
+      const err = await preflightJoin(data.code, HOST_NAME, true);
+      if (err) {
+        setError(err);
+        setBusy(false);
+        return;
+      }
+      rememberName(HOST_NAME);
       navigate({ to: "/host/$code", params: { code: data.code } });
     } catch {
       setError("Couldn't reach the server. Try again.");
@@ -36,10 +60,19 @@ function Home() {
     }
   };
 
-  const join = () => {
+  const join = async () => {
     if (!cleanName) return setError("Pick a name before joining.");
     if (!cleanCode) return setError("Enter a room code to join.");
     setError(null);
+    setBusy(true);
+    // Validate against the room first: a wrong code or taken name shows inline
+    // and the form stays put. Only a clean join transitions to the room.
+    const err = await preflightJoin(cleanCode, cleanName, false);
+    if (err) {
+      setError(err);
+      setBusy(false);
+      return;
+    }
     rememberName(cleanName);
     navigate({ to: "/play/$code", params: { code: cleanCode } });
   };
@@ -51,6 +84,10 @@ function Home() {
 
   return (
     <main className="grain-above relative mx-auto flex min-h-dvh w-full max-w-xl flex-col justify-center gap-10 px-6 py-12">
+      <div className="absolute right-6 top-6">
+        <ThemeToggle />
+      </div>
+
       {/* wordmark */}
       <header className="rise flex flex-col items-center gap-3 text-center">
         <span className="font-mono text-xs uppercase tracking-[0.45em] text-muted">
@@ -58,7 +95,15 @@ function Home() {
         </span>
         <h1 className="font-display text-7xl font-black leading-none tracking-tight text-foreground sm:text-8xl">
           sk
-          <span className="text-primary">oo</span>
+          <span
+            className="float inline-block"
+            style={{
+              WebkitTextStroke: "2px var(--color-foreground)",
+              color: "transparent",
+            }}
+          >
+            oo
+          </span>
           bl
         </h1>
         <p className="max-w-xs text-balance text-sm text-muted">
@@ -72,55 +117,62 @@ function Home() {
         style={{ "--d": "90ms" } as React.CSSProperties}
       >
         {/* tabs */}
-        <div className="flex gap-1 rounded-2xl border-2 border-border bg-surface-2 p-1">
-          <TabButton active={tab === "join"} onClick={() => switchTab("join")}>
-            Join a room
-          </TabButton>
-          <TabButton active={tab === "host"} onClick={() => switchTab("host")}>
-            Host a game
-          </TabButton>
+        <Segmented
+          value={tab}
+          onChange={(v) => switchTab(v)}
+          options={[
+            { value: "join", label: "Join a room" },
+            { value: "host", label: "Host a game" },
+          ]}
+          itemClassName="flex-1 px-4 py-2.5 text-sm font-bold"
+        />
+
+        {/* swapped per tab — keyed so it crossfades in on each switch. Join asks
+            for a name + code; hosting needs neither (the host is the screen). */}
+        <div key={tab} className="rise flex min-h-[11rem] flex-col justify-center gap-6">
+          {tab === "join" ? (
+            <>
+              <label className="flex flex-col gap-2">
+                <span className="font-mono text-xs uppercase tracking-widest text-muted">
+                  Your name
+                </span>
+                <input
+                  dir="auto"
+                  className="field px-4 py-3.5"
+                  placeholder="e.g. captain chaos"
+                  value={name}
+                  maxLength={20}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && join()}
+                />
+              </label>
+              <label className="flex flex-col gap-2">
+                <span className="font-mono text-xs uppercase tracking-widest text-muted">
+                  Room code
+                </span>
+                <input
+                  className="field px-4 py-3.5 text-center font-mono text-lg uppercase tracking-[0.3em]"
+                  placeholder="code"
+                  value={code}
+                  maxLength={6}
+                  onChange={(e) => {
+                    setCode(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && join()}
+                />
+              </label>
+            </>
+          ) : (
+            <p className="rounded-xl border border-dashed border-border px-5 py-6 text-center text-sm text-muted">
+              You're the big screen — no nickname needed. Start a room and share
+              the code for everyone to join from their phones.
+            </p>
+          )}
         </div>
-
-        <label className="flex flex-col gap-2">
-          <span className="font-mono text-xs uppercase tracking-widest text-muted">
-            Your name
-          </span>
-          <input
-            dir="auto"
-            className="field px-4 py-3.5"
-            placeholder="e.g. captain chaos"
-            value={name}
-            maxLength={20}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (error) setError(null);
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (tab === "host" ? host() : join())}
-          />
-        </label>
-
-        {tab === "join" ? (
-          <label className="flex flex-col gap-2">
-            <span className="font-mono text-xs uppercase tracking-widest text-muted">
-              Room code
-            </span>
-            <input
-              className="field px-4 py-3.5 text-center font-mono text-lg uppercase tracking-[0.3em]"
-              placeholder="code"
-              value={code}
-              maxLength={6}
-              onChange={(e) => {
-                setCode(e.target.value);
-                if (error) setError(null);
-              }}
-              onKeyDown={(e) => e.key === "Enter" && join()}
-            />
-          </label>
-        ) : (
-          <p className="rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted">
-            You'll get a room code to share once the lobby opens.
-          </p>
-        )}
 
         <button
           type="button"
@@ -132,11 +184,13 @@ function Home() {
             ? busy
               ? "Creating room…"
               : "Host a game"
-            : "Join room"}
+            : busy
+              ? "Joining…"
+              : "Join room"}
         </button>
 
         {error && (
-          <p className="rounded-xl border-2 border-secondary/40 bg-secondary/10 px-4 py-3 text-center text-sm font-medium text-secondary">
+          <p className="rise rounded-xl border-2 border-red-500/70 bg-red-500/10 px-4 py-3 text-center text-sm font-medium text-red-500">
             {error}
           </p>
         )}
@@ -149,27 +203,5 @@ function Home() {
         no app · no signup · just a code
       </p>
     </main>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
-        active ? "bg-primary text-primary-foreground" : "text-muted hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

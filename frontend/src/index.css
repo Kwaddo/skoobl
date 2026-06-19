@@ -4,34 +4,90 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* ── skoobl: midnight game-show arcade ───────────────────────────────────
-   Near-black canvas, acid-lime + hot-pink neon, chunky toy-like cards with
-   hard offset shadows. Unbounded (display) / Hanken Grotesk (UI) / Space
-   Mono (room codes).                                                        */
+/* `short:` applies when the viewport is too short for the stacked drawing layout
+   — the player then puts the tools beside the canvas. */
+@custom-variant short (@media (max-height: 760px));
+
+/* ── skoobl: black & white arcade ───────────────────────────────────────────
+   Pure monochrome UI — ink-black field, chalk-white ink, chunky "key-cap"
+   buttons with hard offset shadows. Everything glides on soft cubic eases.
+   The drawing canvas keeps its full-color palette (see lib/canvas.ts).
+   Unbounded (display) / Hanken Grotesk (UI) / Space Mono (codes).            */
 
 @theme {
-  --color-background: #0c0c11;
-  --color-surface: #16161f;
-  --color-surface-2: #1f1f2b;
-  --color-foreground: #f5f4ec;
-  --color-muted: #8a8a9c;
-  --color-border: #2c2c3a;
+  --color-background: #08080a;
+  --color-surface: #131316;
+  --color-surface-2: #1c1c20;
+  --color-foreground: #f6f6f4;
+  --color-muted: #8d8d96;
+  --color-border: #2b2b31;
 
-  --color-primary: #d9fb06; /* acid lime */
-  --color-primary-foreground: #0c0c11;
-  --color-secondary: #ff5c8a; /* hot pink */
-  --color-secondary-foreground: #0c0c11;
-  --color-accent: #5ad1ff; /* cyan, used sparingly */
+  /* white is the action color: black text on white keycaps */
+  --color-primary: #f6f6f4;
+  --color-primary-foreground: #08080a;
+  --color-secondary: #f6f6f4;
+  --color-secondary-foreground: #08080a;
+  --color-accent: #ffffff;
 
   --font-display: "Unbounded", system-ui, sans-serif;
   --font-sans: "Hanken Grotesk", system-ui, sans-serif;
   --font-mono: "Space Mono", ui-monospace, monospace;
 
   --radius: 1.25rem;
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-html {
+/* ── theme variables ────────────────────────────────────────────────────────
+   The @theme tokens above are the DARK defaults. Below, :root restates the
+   theme-dependent helper variables for dark, and [data-theme="light"] flips
+   every token + helper for light. Both are unlayered so they reliably win over
+   the generated token layer. Avatars read --av-* / --av-ink so they recolor for
+   free when the theme changes.                                               */
+:root {
   color-scheme: dark;
+  --glow-1: rgba(255, 255, 255, 0.07);
+  --glow-2: rgba(255, 255, 255, 0.05);
+  --grid-dot: rgba(255, 255, 255, 0.11);
+  --grid-opacity: 0.75;
+  --hover-tint: rgba(255, 255, 255, 0.06);
+  --ring: rgba(255, 255, 255, 0.12);
+  --inset-hi: rgba(255, 255, 255, 0.05);
+
+  --av-ink: #08080a;
+  --av-bg: #f6f6f4;
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --color-background: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #efefec;
+  --color-foreground: #121216;
+  --color-muted: #6c6c74;
+  --color-border: #dcdbd4;
+
+  --color-primary: #121216;
+  --color-primary-foreground: #fafafa;
+  --color-secondary: #121216;
+  --color-secondary-foreground: #fafafa;
+  --color-accent: #000000;
+
+  --glow-1: rgba(0, 0, 0, 0.06);
+  --glow-2: rgba(0, 0, 0, 0.05);
+  --grid-dot: rgba(0, 0, 0, 0.18);
+  --grid-opacity: 0.65;
+  --hover-tint: rgba(0, 0, 0, 0.05);
+  --ring: rgba(0, 0, 0, 0.14);
+  --inset-hi: rgba(255, 255, 255, 0.7);
+
+  --av-ink: #f6f6f4;
+  --av-bg: #2a2a2e;
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.22);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.36);
 }
 
 body {
@@ -41,25 +97,33 @@ body {
   color: var(--color-foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  /* layered neon glows + a faint dotted grid for arcade atmosphere */
+  /* no rubber-band / pull-to-refresh on mobile while drawing near edges */
+  overscroll-behavior: none;
+  /* soft glows in the corners for depth (tint adapts to the theme) */
   background-image:
-    radial-gradient(
-      40rem 40rem at 12% -8%,
-      color-mix(in oklab, var(--color-primary) 18%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      36rem 36rem at 105% 110%,
-      color-mix(in oklab, var(--color-secondary) 20%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      circle at center,
-      color-mix(in oklab, var(--color-foreground) 4%, transparent) 1px,
-      transparent 1px
-    );
-  background-size: 100% 100%, 100% 100%, 22px 22px;
+    radial-gradient(44rem 44rem at 12% -10%, var(--glow-1), transparent 70%),
+    radial-gradient(40rem 40rem at 108% 112%, var(--glow-2), transparent 70%);
   background-attachment: fixed;
+  transition:
+    background-color 0.5s var(--ease-out-soft),
+    color 0.5s var(--ease-out-soft);
+}
+
+/* slowly drifting dotted grid — the "alive" backdrop, sits behind everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -48px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--grid-opacity);
+  background-image: radial-gradient(
+    circle,
+    var(--grid-dot) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+  animation: grid-drift 26s linear infinite;
 }
 
 /* film grain overlay */
@@ -69,8 +133,78 @@ body::after {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.035;
+  opacity: 0.04;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* lifts page content above the fixed grain/grid layers */
+.grain-above {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── minimal thin scrollbar ──────────────────────────────────────────────────
+   A slim, track-less scrollbar for any overflowing container, themed to a faint
+   foreground tint that darkens on hover. Firefox uses scrollbar-width/-color;
+   Chromium/WebKit use the ::-webkit-scrollbar pseudo-elements. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── gamified cursor ─────────────────────────────────────────────────────────
+   A chunky arrow (white fill, black outline → visible on any background) across
+   the whole game; an accented variant on anything clickable; text caret in
+   inputs; not-allowed on disabled buttons. The canvas keeps its own crosshair. */
+body {
+  cursor: url("/cursor.svg") 4 4, auto;
+}
+a,
+button:not(:disabled),
+[role="button"],
+summary,
+.cursor-pointer {
+  cursor: url("/cursor-pointer.svg") 4 4, pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+input,
+textarea,
+select {
+  cursor: text;
+}
+
+/* ── mobile touch hardening ──────────────────────────────────────────────────
+   Controls respond instantly (no 300ms tap delay, no double-tap zoom); the
+   drawing canvas never shows the long-press callout / selection. */
+a,
+button,
+[role="button"],
+summary,
+label {
+  touch-action: manipulation;
+}
+canvas {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
 }
 
 @layer components {
@@ -79,14 +213,29 @@ body::after {
     border: 2px solid var(--color-border);
     border-radius: var(--radius);
     box-shadow:
-      0 1px 0 0 color-mix(in oklab, var(--color-foreground) 6%, transparent)
-        inset,
-      0 24px 60px -28px rgba(0, 0, 0, 0.9);
+      0 1px 0 0 var(--inset-hi) inset,
+      0 24px 60px -28px rgba(0, 0, 0, 0.5);
+    transition:
+      border-color 0.25s var(--ease-out-soft),
+      background-color 0.5s var(--ease-out-soft),
+      color 0.5s var(--ease-out-soft),
+      transform 0.25s var(--ease-out-soft),
+      box-shadow 0.25s var(--ease-out-soft);
+  }
+
+  /* a card that reacts to hover — used for interactive tiles */
+  .card-hover:hover {
+    border-color: color-mix(in oklab, var(--color-foreground) 45%, transparent);
+    transform: translateY(-3px);
+    box-shadow:
+      0 1px 0 0 var(--inset-hi) inset,
+      0 30px 60px -26px rgba(0, 0, 0, 0.55);
   }
 
   /* primary "key cap" button: hard offset shadow + press-down on click */
   .btn-key {
-    --shadow-color: color-mix(in oklab, var(--color-primary) 55%, #000);
+    --shadow-color: #000;
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -97,28 +246,52 @@ body::after {
     color: var(--color-primary-foreground);
     background: var(--color-primary);
     border-radius: 999px;
-    box-shadow: 0 5px 0 0 var(--shadow-color);
+    overflow: hidden;
+    box-shadow:
+      0 5px 0 0 var(--shadow-color),
+      0 16px 28px -14px rgba(0, 0, 0, 0.8);
     transition:
-      transform 0.06s ease,
-      box-shadow 0.06s ease,
-      filter 0.15s ease;
+      transform 0.08s var(--ease-out-soft),
+      box-shadow 0.08s var(--ease-out-soft),
+      background-color 0.5s var(--ease-out-soft),
+      color 0.5s var(--ease-out-soft),
+      border-color 0.5s var(--ease-out-soft),
+      filter 0.2s ease;
+  }
+  /* travelling sheen on hover — tinted with the button's foreground colour so it
+     contrasts with the face (a dark sweep on white keys, a light one on black). */
+  .btn-key::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 35%,
+      color-mix(in oklab, var(--color-primary-foreground) 40%, transparent) 50%,
+      transparent 65%
+    );
+    transform: translateX(-120%);
+    transition: transform 0.6s var(--ease-out-soft);
+  }
+  .btn-key:hover::after {
+    transform: translateX(120%);
   }
   .btn-key:hover {
-    filter: brightness(1.05);
+    filter: brightness(1.04);
   }
   .btn-key:active {
     transform: translateY(5px);
-    box-shadow: 0 0 0 0 var(--shadow-color);
+    box-shadow:
+      0 0 0 0 var(--shadow-color),
+      0 6px 14px -10px rgba(0, 0, 0, 0.8);
   }
   .btn-key:disabled {
-    filter: grayscale(0.6) brightness(0.7);
+    filter: grayscale(1) brightness(0.55);
     cursor: not-allowed;
     box-shadow: 0 5px 0 0 #000;
   }
-  .btn-key--pink {
-    --shadow-color: color-mix(in oklab, var(--color-secondary) 55%, #000);
-    background: var(--color-secondary);
-    color: var(--color-secondary-foreground);
+  .btn-key:disabled::after {
+    display: none;
   }
 
   .btn-ghost {
@@ -132,20 +305,21 @@ body::after {
     border-radius: 999px;
     background: transparent;
     transition:
-      border-color 0.15s ease,
-      background 0.15s ease,
-      transform 0.06s ease;
+      border-color 0.18s ease,
+      background 0.18s ease,
+      color 0.5s var(--ease-out-soft),
+      transform 0.08s var(--ease-out-soft);
   }
   .btn-ghost:hover {
-    border-color: color-mix(
-      in oklab,
-      var(--color-primary) 60%,
-      var(--color-border)
-    );
-    background: color-mix(in oklab, var(--color-primary) 8%, transparent);
+    border-color: color-mix(in oklab, var(--color-foreground) 55%, transparent);
+    background: var(--hover-tint);
   }
   .btn-ghost:active {
     transform: translateY(2px);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .field {
@@ -156,17 +330,29 @@ body::after {
     color: var(--color-foreground);
     font-size: 1.05rem;
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease;
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      background-color 0.5s var(--ease-out-soft),
+      color 0.5s var(--ease-out-soft);
   }
   .field::placeholder {
     color: var(--color-muted);
   }
   .field:focus {
     outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 4px
-      color-mix(in oklab, var(--color-primary) 18%, transparent);
+    border-color: var(--color-foreground);
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+}
+
+/* ── animations ─────────────────────────────────────────────────────────── */
+
+@keyframes grid-drift {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(24px, 24px);
   }
 }
 
@@ -174,7 +360,7 @@ body::after {
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -182,7 +368,26 @@ body::after {
   }
 }
 .rise {
-  animation: rise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: rise 0.55s var(--ease-out-soft) both;
+  animation-delay: var(--d, 0ms);
+}
+
+/* pop-in: scale up from small — for chips, badges, scoreboard rows */
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.pop {
+  animation: pop 0.4s var(--ease-out-soft) both;
   animation-delay: var(--d, 0ms);
 }
 
@@ -201,9 +406,105 @@ body::after {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
+/* gentle float — for hero glyphs / idle decoration */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.float {
+  animation: float 3.4s ease-in-out infinite;
+}
+
+/* heartbeat — urgent timer */
+@keyframes heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+.heartbeat {
+  animation: heartbeat 0.8s ease-in-out infinite;
+}
+
+/* celebratory bounce — winner glyph */
+@keyframes trophy-bounce {
+  0% {
+    transform: scale(0.4) rotate(-12deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.15) rotate(6deg);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(0.95) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.trophy-bounce {
+  animation: trophy-bounce 0.7s var(--ease-out-soft) both;
+}
+
+/* ── theme switch ───────────────────────────────────────────────────────────
+   Where the View Transitions API exists, the new theme is revealed by a circle
+   growing from the toggle (origin + radius set in JS). The old snapshot stays
+   put underneath while the new one wipes over it.                            */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-reveal 0.55s var(--ease-out-soft);
+}
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0px at var(--vt-x, 50%) var(--vt-y, 0px));
+  }
+  to {
+    clip-path: circle(var(--vt-r, 150%) at var(--vt-x, 50%) var(--vt-y, 0px));
+  }
+}
+
+/* Fallback for browsers without View Transitions: a brief global colour
+   crossfade, toggled on for the duration of the switch by lib/theme. */
+html.theme-anim,
+html.theme-anim *,
+html.theme-anim *::before,
+html.theme-anim *::after {
+  transition:
+    background-color 0.45s var(--ease-out-soft),
+    color 0.45s var(--ease-out-soft),
+    border-color 0.45s var(--ease-out-soft),
+    fill 0.45s var(--ease-out-soft),
+    box-shadow 0.45s var(--ease-out-soft) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rise,
-  .live-dot {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
   }
 }

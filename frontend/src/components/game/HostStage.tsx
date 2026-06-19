@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
+import { Segmented } from "@/components/Segmented";
 import { useCountdown } from "@/hooks/use-countdown";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { useGameStore } from "@/lib/store";
+import { Brush } from "./icons";
 import { StrokesView } from "./StrokesView";
 import {
   CodeCard,
@@ -52,6 +54,43 @@ export function HostStage({
   }
 }
 
+// The big drawing on the host TV is a box that FILLS its cell (so the screen
+// never looks half-empty); the strokes scale up inside it with object-contain,
+// keeping their aspect ratio. HOST_CANVAS_BOX styles the box, HOST_CANVAS the
+// canvas that fills it.
+const HOST_CANVAS_BOX =
+  "min-h-0 overflow-hidden rounded-2xl border-2 border-border bg-surface shadow-[0_24px_60px_-28px_rgba(0,0,0,0.55)]";
+const HOST_CANVAS = "h-full w-full object-contain";
+
+// Panel is a host dashboard card that fills its column and scrolls its body when
+// the content is taller than the space — the workhorse that keeps the big screen
+// looking full and organized instead of leaving floating gaps.
+function Panel({
+  title,
+  aside,
+  children,
+  className = "",
+}: {
+  title?: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`card-arcade flex min-h-0 flex-col p-4 sm:p-5 ${className}`}>
+      {(title || aside) && (
+        <div className="mb-3 flex shrink-0 items-baseline justify-between gap-3">
+          {title && (
+            <h2 className="font-display text-lg font-bold sm:text-xl">{title}</h2>
+          )}
+          {aside}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto pr-1">{children}</div>
+    </div>
+  );
+}
+
 function HostLobby({ actions }: { actions: GameActions }) {
   const code = useGameStore((s) => s.code);
   const players = useGameStore((s) => s.players);
@@ -59,32 +98,41 @@ function HostLobby({ actions }: { actions: GameActions }) {
   const canStart = connected >= MIN_PLAYERS;
 
   return (
-    <div className="flex flex-col gap-6">
-      <CodeCard code={code} />
-
-      <div>
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="font-display text-xl font-bold">In the lobby</h2>
-          <span className="font-mono text-sm text-muted">
-            {players.length} {players.length === 1 ? "player" : "players"}
-          </span>
-        </div>
-        <PlayerGrid players={players} />
+    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+      {/* left: share the code + see who's in */}
+      <div className="flex min-h-0 flex-col gap-5">
+        <CodeCard code={code} />
+        <Panel
+          className="flex-1"
+          title="In the lobby"
+          aside={
+            <span className="font-mono text-sm text-muted">
+              {players.length} {players.length === 1 ? "player" : "players"}
+            </span>
+          }
+        >
+          <PlayerGrid players={players} />
+        </Panel>
       </div>
 
-      <HostConfig actions={actions} />
-      <button
-        type="button"
-        className="btn-key w-full px-6 py-4 text-lg"
-        onClick={actions.start}
-        disabled={!canStart}
-      >
-        {canStart
-          ? "Start the game →"
-          : `Need ${MIN_PLAYERS - connected} more player${
-              MIN_PLAYERS - connected === 1 ? "" : "s"
-            }…`}
-      </button>
+      {/* right: settings + start */}
+      <div className="flex min-h-0 flex-col gap-5">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <HostConfig actions={actions} />
+        </div>
+        <button
+          type="button"
+          className="btn-key w-full shrink-0 px-6 py-4 text-lg"
+          onClick={actions.start}
+          disabled={!canStart}
+        >
+          {canStart
+            ? "Start the game →"
+            : `Need ${MIN_PLAYERS - connected} more player${
+                MIN_PLAYERS - connected === 1 ? "" : "s"
+              }…`}
+        </button>
+      </div>
     </div>
   );
 }
@@ -97,25 +145,32 @@ function HostDrawing() {
   const drawn = players.filter((p) => p.hasDrawn).length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-5">
+      <div className="flex shrink-0 items-center justify-between gap-3">
         <div className="flex flex-col">
           <span className="font-mono text-xs uppercase tracking-widest text-muted">
             Everyone is drawing
           </span>
           <span
             dir="auto"
-            className="font-display text-3xl font-bold text-primary"
+            className="font-display text-3xl font-bold sm:text-4xl"
           >
             {prompt || "…"}
           </span>
         </div>
         <Timer remaining={remaining} />
       </div>
-      <p className="font-mono text-sm text-muted">
-        {drawn} of {players.length} finished
-      </p>
-      <Roster players={players} mode="drawing" />
+      <Panel
+        className="flex-1"
+        title="Sketching…"
+        aside={
+          <span className="font-mono text-sm text-muted">
+            {drawn} of {players.length} finished
+          </span>
+        }
+      >
+        <Roster players={players} mode="drawing" />
+      </Panel>
     </div>
   );
 }
@@ -125,15 +180,32 @@ function HostGuessing() {
   const players = useGameStore((s) => s.players);
   const endsAt = useGameStore((s) => s.phaseEndsAt);
   const remaining = useCountdown(endsAt);
+  const guessed = players.filter((p) => p.hasGuessed).length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-3xl font-bold">Who drew this?</h2>
-        <Timer remaining={remaining} />
+    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
+      <div className="flex min-h-0 flex-col gap-4">
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          <h2 className="font-display text-2xl font-bold sm:text-3xl">
+            Who drew this?
+          </h2>
+          <Timer remaining={remaining} />
+        </div>
+        <div className={`flex-1 ${HOST_CANVAS_BOX}`}>
+          <StrokesView strokes={drawing} className={HOST_CANVAS} />
+        </div>
       </div>
-      <StrokesView strokes={drawing} />
-      <Roster players={players} mode="guessing" />
+      <Panel
+        className="flex-1"
+        title="Players"
+        aside={
+          <span className="font-mono text-sm text-muted">
+            {guessed}/{players.length} guessed
+          </span>
+        }
+      >
+        <Roster players={players} mode="guessing" />
+      </Panel>
     </div>
   );
 }
@@ -146,45 +218,80 @@ function HostReveal({ actions }: { actions: GameActions }) {
   const totalRounds = useGameStore((s) => s.totalRounds);
   const isLast = round >= totalRounds;
   const correct = players.filter((p) => p.correct);
+  // A round where nobody drew anything skips guessing and lands here with no
+  // artist — show a "nobody drew" message instead of a blank canvas.
+  const noArtist = !reveal?.artist;
 
   return (
-    <div className="flex flex-col gap-4">
-      <StrokesView strokes={drawing} />
-
-      <div className="card-arcade flex flex-col gap-1 p-5 text-center">
-        <span className="font-mono text-xs uppercase tracking-widest text-muted">
-          It was drawn by
-        </span>
-        <span
-          dir="auto"
-          className="font-display text-2xl font-bold text-primary"
+    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
+      {noArtist ? (
+        <div
+          className={`flex flex-col items-center justify-center gap-3 p-8 text-center ${HOST_CANVAS_BOX}`}
         >
-          {reveal?.artist ?? "—"}
-        </span>
-        {reveal?.prompt && (
-          <span dir="auto" className="text-sm text-muted">
-            prompt: {reveal.prompt}
-          </span>
-        )}
-        <span className="mt-2 text-sm">
-          {correct.length === 0
-            ? "Nobody guessed right!"
-            : `${correct.length} guessed it: `}
-          <span dir="auto" className="font-semibold">
-            {correct.map((p) => p.name).join(", ")}
-          </span>
-        </span>
+          <Brush className="h-12 w-12 text-muted" />
+          <p className="font-display text-2xl font-bold">
+            Nobody drew anything
+          </p>
+          <p className="text-sm text-muted">
+            Everyone ran out of time or left the canvas blank.
+          </p>
+        </div>
+      ) : (
+        <div className={HOST_CANVAS_BOX}>
+          <StrokesView strokes={drawing} className={HOST_CANVAS} />
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-col gap-4">
+        <div className="card-arcade rise flex shrink-0 flex-col gap-1 p-5 text-center">
+          {noArtist ? (
+            <>
+              <span className="font-display text-2xl font-bold">
+                No drawing this round
+              </span>
+              {reveal?.prompt && (
+                <span dir="auto" className="text-sm text-muted">
+                  the word was: {reveal.prompt}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="font-mono text-xs uppercase tracking-widest text-muted">
+                It was drawn by
+              </span>
+              <span dir="auto" className="font-display text-2xl font-bold">
+                {reveal?.artist ?? "—"}
+              </span>
+              {reveal?.prompt && (
+                <span dir="auto" className="text-sm text-muted">
+                  prompt: {reveal.prompt}
+                </span>
+              )}
+              <span className="mt-2 text-sm">
+                {correct.length === 0
+                  ? "Nobody guessed right!"
+                  : `${correct.length} guessed it: `}
+                <span dir="auto" className="font-semibold">
+                  {correct.map((p) => p.name).join(", ")}
+                </span>
+              </span>
+            </>
+          )}
+        </div>
+
+        <Panel className="flex-1" title="Leaderboard">
+          <Scoreboard players={players} />
+        </Panel>
+
+        <button
+          type="button"
+          className="btn-key w-full shrink-0 px-6 py-4 text-lg"
+          onClick={actions.nextPhase}
+        >
+          {isLast ? "See final results →" : "Next round →"}
+        </button>
       </div>
-
-      <Scoreboard players={players} />
-
-      <button
-        type="button"
-        className="btn-key btn-key--pink w-full px-6 py-4 text-lg"
-        onClick={actions.nextPhase}
-      >
-        {isLast ? "See final results →" : "Next round →"}
-      </button>
     </div>
   );
 }
@@ -247,8 +354,8 @@ function HostConfig({ actions }: { actions: GameActions }) {
   );
 
   return (
-    <div className="card-arcade flex flex-col gap-5 p-5">
-      <h3 className="font-display text-lg font-bold">Game settings</h3>
+    <div className="card-arcade flex h-full min-h-0 flex-col gap-5 overflow-auto p-4 sm:p-5">
+      <h3 className="shrink-0 font-display text-lg font-bold">Game settings</h3>
 
       <Row label="Rounds">
         <Stepper
@@ -315,22 +422,35 @@ function HostConfig({ actions }: { actions: GameActions }) {
         />
       </Row>
 
-      {mode === "custom" && (
-        <label className="flex flex-col gap-2">
-          <span className="text-sm text-muted">
-            One word per line — these replace the random pool.
-          </span>
-          <textarea
-            dir="auto"
-            rows={3}
-            value={categories}
-            placeholder={"pizza\nrobot\ncastle"}
-            onChange={(e) => setCategories(e.target.value)}
-            onBlur={() => sync({})}
-            className="field resize-y px-3 py-2 text-sm"
-          />
-        </label>
-      )}
+      {/* Slides + fades open/closed. The grid-rows 0fr→1fr trick animates the
+          height smoothly; the negative margin cancels the parent's gap while
+          collapsed so nothing leaves a dead space behind. */}
+      <div
+        className={`grid transition-all duration-300 ease-out-soft ${
+          mode === "custom"
+            ? "mt-0 grid-rows-[1fr] opacity-100"
+            : "-mt-5 grid-rows-[0fr] opacity-0"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <label className="flex flex-col gap-2">
+            <span className="text-sm text-muted">
+              One word per line — these replace the random pool.
+            </span>
+            <textarea
+              dir="auto"
+              rows={3}
+              value={categories}
+              placeholder={"pizza\nrobot\ncastle"}
+              onChange={(e) => setCategories(e.target.value)}
+              onBlur={() => sync({})}
+              disabled={mode !== "custom"}
+              tabIndex={mode === "custom" ? 0 : -1}
+              className="field resize-y px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+      </div>
     </div>
   );
 }
@@ -347,36 +467,6 @@ function Row({
     <div className="flex flex-wrap items-center justify-between gap-3">
       <span className="text-sm font-medium">{label}</span>
       {children}
-    </div>
-  );
-}
-
-// Segmented is a pill-style single-choice control matching the arcade theme.
-function Segmented<T extends string | number>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-1 rounded-xl border-2 border-border bg-surface-2 p-1">
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
-            value === o.value
-              ? "bg-primary text-primary-foreground"
-              : "text-muted hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -406,8 +496,10 @@ function Stepper({
       >
         −
       </button>
-      <span className="w-6 text-center font-display text-lg font-bold">
-        {value}
+      <span className="w-6 overflow-hidden text-center font-display text-lg font-bold">
+        <span key={value} className="pop block">
+          {value}
+        </span>
       </span>
       <button
         type="button"

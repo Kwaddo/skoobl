@@ -50,7 +50,7 @@ type Player struct {
 
 	// View-only, derived fields (omitted from the authoritative snapshot).
 	Connected  bool `json:"connected,omitempty"`
-	HasDrawn   bool `json:"hasDrawn,omitempty"`   // submitted a drawing this round
+	HasDrawn   bool `json:"hasDrawn,omitempty"`   // drew something non-empty this round
 	HasGuessed bool `json:"hasGuessed,omitempty"` // submitted a guess this round
 	Correct    bool `json:"correct,omitempty"`    // reveal: guessed the artist right
 }
@@ -149,7 +149,10 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		if pr, ok := present[p.Name]; ok {
 			pub.Connected = pr.connected
 		}
-		if _, ok := g.Drawings[p.Name]; ok {
+		// HasDrawn means they actually drew something (non-empty). An empty
+		// lock-in doesn't count: such players are skipped for the featured
+		// drawing and excluded from the "who drew this?" options.
+		if len(g.Drawings[p.Name]) > 0 {
 			pub.HasDrawn = true
 		}
 		if _, ok := g.Guesses[p.Name]; ok {
