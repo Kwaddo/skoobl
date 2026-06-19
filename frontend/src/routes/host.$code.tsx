@@ -7,5 +7,5 @@ export const Route = createFileRoute("/host/$code")({
 
 function Host() {
   const { code } = Route.useParams();
-  return <GameStage code={code} />;
+  return <GameStage code={code} screen="host" />;
 }

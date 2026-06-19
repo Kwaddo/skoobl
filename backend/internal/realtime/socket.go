@@ -47,6 +47,7 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 	sock.On("configure", func(args ...any) { c.configure(args) })
 	sock.On("start", func(...any) { c.submit(game.Command{Kind: game.CmdStart}) })
 	sock.On("nextPhase", func(...any) { c.submit(game.Command{Kind: game.CmdNextPhase}) })
+	sock.On("returnToLobby", func(...any) { c.submit(game.Command{Kind: game.CmdReturnToLobby}) })
 	sock.On("submitDrawing", func(args ...any) { c.submitDrawing(args) })
 	sock.On("submitGuess", func(args ...any) {
 		c.submit(game.Command{Kind: game.CmdSubmitGuess, Guess: strings.TrimSpace(stringField(args, "artist"))})
@@ -58,6 +59,7 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 func (c *conn) join(h *hub.Hub, args []any) {
 	code := strings.TrimSpace(stringField(args, "code"))
 	name := strings.TrimSpace(stringField(args, "name"))
+	spectator := boolField(args, "spectator")
 
 	if name == "" {
 		c.emitError("Please enter a name before joining.")
@@ -79,7 +81,7 @@ func (c *conn) join(h *hub.Hub, args []any) {
 	// Submit the join and wait for the room's verdict before wiring anything up.
 	updates := make(chan game.GameState, 16)
 	resp := make(chan string, 1)
-	room.Submit(game.Command{Kind: game.CmdJoin, Player: name, Subscribe: updates, Ack: resp})
+	room.Submit(game.Command{Kind: game.CmdJoin, Player: name, Spectator: spectator, Subscribe: updates, Ack: resp})
 
 	var msg string
 	select {
@@ -215,4 +217,17 @@ func stringField(args []any, key string) string {
 	}
 	s, _ := m[key].(string)
 	return s
+}
+
+// boolField pulls a bool field from the first event argument (a JSON object).
+func boolField(args []any, key string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	m, ok := args[0].(map[string]any)
+	if !ok {
+		return false
+	}
+	b, _ := m[key].(bool)
+	return b
 }
