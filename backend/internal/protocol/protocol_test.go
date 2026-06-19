@@ -6,20 +6,20 @@ import (
 )
 
 func TestDecodeCommand(t *testing.T) {
-	raw := []byte(`{"type":"submitAnswer","payload":{"answer":"banana"}}`)
+	raw := []byte(`{"type":"submitGuess","payload":{"artist":"alice"}}`)
 	env, err := DecodeEnvelope(raw)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if env.Type != CmdSubmitAnswer {
-		t.Fatalf("type = %q, want %q", env.Type, CmdSubmitAnswer)
+	if env.Type != CmdSubmitGuess {
+		t.Fatalf("type = %q, want %q", env.Type, CmdSubmitGuess)
 	}
-	var p SubmitAnswerPayload
+	var p SubmitGuessPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		t.Fatalf("payload: %v", err)
 	}
-	if p.Answer != "banana" {
-		t.Fatalf("answer = %q, want banana", p.Answer)
+	if p.Artist != "alice" {
+		t.Fatalf("artist = %q, want alice", p.Artist)
 	}
 }
 
