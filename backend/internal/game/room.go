@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math/rand/v2"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // CmdKind enumerates the mutations a Room accepts.
@@ -14,9 +18,13 @@ type CmdKind int
 const (
 	CmdJoin CmdKind = iota
 	CmdDisconnect
-	CmdStart
-	CmdSubmitAnswer
-	CmdNextPhase
+	CmdLeave         // player: leave the room now (immediate removal, no grace)
+	CmdConfigure     // host: set rounds/categories/language/timers (lobby only)
+	CmdStart         // host: lobby → drawing (requires minPlayers)
+	CmdSubmitDrawing // player: submit strokes during the drawing phase
+	CmdSubmitGuess   // player: guess the artist during the guessing phase
+	CmdNextPhase     // host: reveal → next round / ended
+	CmdAdvance       // internal, timer-driven phase advance
 	CmdPrune
 	CmdReapIfEmpty
 )
@@ -26,9 +34,50 @@ const (
 	// DefaultGrace is how long a disconnected player (or a never-populated room)
 	// is kept before being pruned/reaped. Survives refreshes and brief drops.
 	DefaultGrace = 60 * time.Second
+	// minPlayers is the smallest room that can start a game — you need an artist
+	// plus enough guessers for "who drew this?" to be a real question.
+	minPlayers = 4
 	// maxPlayers caps a single room.
 	maxPlayers = 12
+
+	// Round configuration bounds and defaults.
+	DefaultRounds  = 3
+	minRounds      = 1
+	maxRounds      = 8
+	DefaultDrawMs  = 80_000
+	DefaultGuessMs = 25_000
+	minDrawMs      = 15_000
+	maxDrawMs      = 180_000
+	minGuessMs     = 10_000
+	maxGuessMs     = 60_000
+
+	// Custom category / name limits.
+	maxCustomCategories = 40
+	maxCategoryLen      = 60
+	maxNameLen          = 24
+
+	// Drawing payload caps — bound memory and broadcast size against abusive
+	// clients (a stroke flood would otherwise grow GameState without limit).
+	maxStrokes         = 800
+	maxPointsPerStroke = 3_000
+	maxPointsTotal     = 40_000
+	minStrokeWidth     = 1
+	maxStrokeWidth     = 48
+
+	// Fixed logical canvas space; must match the frontend's canvas resolution so
+	// strokes render identically for everyone. Coordinates are clamped to it.
+	canvasW = 1000
+	canvasH = 750
+
+	// Score awarded to a player who correctly identifies the artist.
+	pointsPerCorrect = 100
 )
+
+// hexColor matches #rgb, #rrggbb, and #rrggbbaa. Stroke colors that don't match
+// are replaced with a safe default so nothing arbitrary reaches the DOM.
+var hexColor = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+
+const defaultStrokeColor = "#f5f4ec"
 
 // presence is per-player liveness, kept out of the serialized GameState.
 type presence struct {
@@ -36,15 +85,26 @@ type presence struct {
 	gen       int // bumped each disconnect; stale prune timers self-cancel
 }
 
+// subscriber pairs a per-client broadcast channel with the player name it
+// belongs to, so broadcast can hand each client its own redacted view.
+type subscriber struct {
+	name string
+	ch   chan GameState
+}
+
 // Command is a single mutation request delivered to a Room's goroutine.
 type Command struct {
 	Kind      CmdKind
 	Player    string
-	Answer    string
 	Subscribe chan GameState // join: per-client broadcast channel
 	Unsub     chan GameState // disconnect: channel to drop from the sub set
 	Ack       chan string    // join: "" on accept, else a rejection message
-	Gen       int            // prune: presence generation captured when armed
+	Gen       int            // prune/advance: generation captured when the timer was armed
+
+	// Game payloads.
+	Strokes []Stroke // submitDrawing
+	Guess   string   // submitGuess: the guessed artist's name
+	Config  *Config  // configure
 }
 
 // Snapshotter persists a room's serialized state. Implemented by
@@ -55,12 +115,13 @@ type Snapshotter interface {
 
 // Room owns its GameState and is the only goroutine that touches it.
 type Room struct {
-	state   GameState
-	cmds    chan Command
-	done    chan struct{}
-	subs    []chan GameState
-	snap    Snapshotter
-	present map[string]*presence
+	state    GameState
+	cmds     chan Command
+	done     chan struct{}
+	subs     []subscriber
+	snap     Snapshotter
+	present  map[string]*presence
+	phaseGen int // bumped on every phase change; stale advance timers self-cancel
 
 	grace      time.Duration
 	onReap     func()
@@ -149,7 +210,8 @@ func (r *Room) Run() {
 
 // onStart arms the initial grace timers. A never-populated room gets an empty
 // timer; a snapshot-restored room starts everyone disconnected (in grace), so
-// abandoned restored rooms reap while reconnecting clients save themselves.
+// abandoned restored rooms reap while reconnecting clients save themselves. A
+// restored mid-round resumes its phase timer so the game doesn't stall.
 func (r *Room) onStart() {
 	if len(r.state.Players) == 0 {
 		r.armEmptyTimer()
@@ -159,6 +221,14 @@ func (r *Room) onStart() {
 		pr := &presence{connected: false, gen: 1}
 		r.present[p.Name] = pr
 		r.armPrune(p.Name, pr.gen)
+	}
+	if r.state.Phase == PhaseDrawing || r.state.Phase == PhaseGuessing {
+		r.phaseGen++
+		d := time.Until(time.UnixMilli(r.state.PhaseEndsAt))
+		if d < 0 {
+			d = 0
+		}
+		r.armAdvance(r.phaseGen, d)
 	}
 }
 
@@ -181,6 +251,15 @@ func (r *Room) armPrune(name string, gen int) {
 	})
 }
 
+// armAdvance schedules a timer-driven phase advance. The captured phaseGen makes
+// the timer a no-op if the phase was already advanced (e.g. everyone submitted
+// early), so manual and timed advances never double-fire.
+func (r *Room) armAdvance(gen int, d time.Duration) {
+	time.AfterFunc(d, func() {
+		r.Submit(Command{Kind: CmdAdvance, Gen: gen})
+	})
+}
+
 func (r *Room) isDone() bool {
 	select {
 	case <-r.done:
@@ -196,28 +275,38 @@ func (r *Room) handle(c Command) {
 		r.join(c)
 	case CmdDisconnect:
 		r.disconnect(c)
+	case CmdLeave:
+		r.leave(c)
 	case CmdPrune:
 		r.prune(c)
 	case CmdReapIfEmpty:
 		if len(r.state.Players) == 0 {
 			r.reap()
 		}
+	case CmdConfigure:
+		if c.Player == r.state.Host && r.state.Phase == PhaseLobby && c.Config != nil {
+			r.applyConfig(*c.Config)
+		}
 	case CmdStart:
-		if c.Player == r.state.Host && r.state.Phase == PhaseLobby {
-			r.state.Phase = PhaseInRound
+		if c.Player == r.state.Host && r.state.Phase == PhaseLobby && r.connectedCount() >= minPlayers {
+			r.startGame()
 		}
-	case CmdSubmitAnswer:
-		if r.state.Phase != PhaseInRound {
-			return
-		}
-		if i := r.state.playerIndex(c.Player); i >= 0 {
-			r.state.Players[i].Answer = c.Answer
-		}
+	case CmdSubmitDrawing:
+		r.submitDrawing(c)
+	case CmdSubmitGuess:
+		r.submitGuess(c)
 	case CmdNextPhase:
-		if c.Player != r.state.Host {
-			return
+		if c.Player == r.state.Host && r.state.Phase == PhaseReveal {
+			if r.state.Round < r.state.TotalRounds {
+				r.beginRound(r.state.Round + 1)
+			} else {
+				r.endGame()
+			}
 		}
-		r.advance()
+	case CmdAdvance:
+		if c.Gen == r.phaseGen {
+			r.advance()
+		}
 	}
 }
 
@@ -225,6 +314,10 @@ func (r *Room) join(c Command) {
 	name := c.Player
 	if r.state.Phase == PhaseEnded {
 		ack(c, "This game has already ended.")
+		return
+	}
+	if utf8.RuneCountInString(name) > maxNameLen {
+		ack(c, "That name is too long.")
 		return
 	}
 	if p, ok := r.present[name]; ok {
@@ -235,7 +328,7 @@ func (r *Room) join(c Command) {
 		// Reconnect: same name returning while marked disconnected.
 		p.connected = true
 		p.gen++ // invalidate the pending prune
-		r.addSub(c.Subscribe)
+		r.addSub(name, c.Subscribe)
 		ack(c, "")
 		return
 	}
@@ -248,7 +341,7 @@ func (r *Room) join(c Command) {
 	}
 	r.state.Players = append(r.state.Players, Player{Name: name})
 	r.present[name] = &presence{connected: true}
-	r.addSub(c.Subscribe)
+	r.addSub(name, c.Subscribe)
 	r.cancelEmptyTimer()
 	ack(c, "")
 }
@@ -269,9 +362,27 @@ func (r *Room) prune(c Command) {
 	if !ok || p.connected || p.gen != c.Gen {
 		return // reconnected, already gone, or a stale timer
 	}
-	delete(r.present, c.Player)
-	if i := r.state.playerIndex(c.Player); i >= 0 {
-		wasHost := r.state.Host == c.Player
+	r.removePlayer(c.Player)
+}
+
+// leave removes a player immediately at their own request (the Leave button),
+// skipping the disconnect grace. Host promotion and reaping apply just as they
+// do for a timed prune.
+func (r *Room) leave(c Command) {
+	r.unsubscribe(c.Unsub)
+	if _, ok := r.present[c.Player]; !ok {
+		return // never present, or already gone
+	}
+	r.removePlayer(c.Player)
+}
+
+// removePlayer drops a player from presence and the roster, promotes the
+// longest-present remaining player if the leaver was host, reaps an emptied
+// room, and lets a departure complete the current phase for those who remain.
+func (r *Room) removePlayer(name string) {
+	delete(r.present, name)
+	if i := r.state.playerIndex(name); i >= 0 {
+		wasHost := r.state.Host == name
 		r.state.Players = append(r.state.Players[:i], r.state.Players[i+1:]...)
 		if wasHost {
 			if len(r.state.Players) > 0 {
@@ -283,6 +394,17 @@ func (r *Room) prune(c Command) {
 	}
 	if len(r.state.Players) == 0 {
 		r.reap()
+		return
+	}
+	switch r.state.Phase {
+	case PhaseDrawing:
+		if r.allDrawn() {
+			r.beginGuessing()
+		}
+	case PhaseGuessing:
+		if r.allGuessed() {
+			r.beginReveal()
+		}
 	}
 }
 
@@ -294,18 +416,230 @@ func (r *Room) reap() {
 	r.Stop()
 }
 
+// --- game flow ------------------------------------------------------------
+
+func (r *Room) applyConfig(cfg Config) {
+	r.state.TotalRounds = clamp(cfg.Rounds, minRounds, maxRounds)
+	if cfg.Language == LangAR {
+		r.state.Language = LangAR
+	} else {
+		r.state.Language = LangEN
+	}
+	r.state.DrawMs = clamp(cfg.DrawMs, minDrawMs, maxDrawMs)
+	r.state.GuessMs = clamp(cfg.GuessMs, minGuessMs, maxGuessMs)
+	r.state.Categories = sanitizeCategories(cfg.Categories)
+}
+
+func (r *Room) startGame() {
+	for i := range r.state.Players {
+		r.state.Players[i].Score = 0
+	}
+	r.state.FeaturedPast = nil
+	r.beginRound(1)
+}
+
+// beginRound resets per-round data, picks the universal prompt everyone draws,
+// and opens the drawing phase.
+func (r *Room) beginRound(n int) {
+	r.state.Round = n
+	r.state.Drawings = map[string][]Stroke{}
+	r.state.Guesses = map[string]string{}
+	r.state.Featured = ""
+	r.state.Prompt = r.pickPrompt()
+	r.startPhase(PhaseDrawing, r.state.DrawMs)
+}
+
+// pickPrompt chooses the single word everyone draws this round, from the custom
+// pool if configured, else the built-in pool for the chosen language. It avoids
+// immediately repeating the previous round's word when the pool allows.
+func (r *Room) pickPrompt() string {
+	pool := r.state.Categories
+	if len(pool) == 0 {
+		pool = builtinPool(r.state.Language)
+	}
+	switch len(pool) {
+	case 0:
+		return "anything"
+	case 1:
+		return pool[0]
+	}
+	prev := r.state.Prompt
+	for i := 0; i < 5; i++ {
+		if w := pool[rand.IntN(len(pool))]; w != prev {
+			return w
+		}
+	}
+	return pool[rand.IntN(len(pool))]
+}
+
+// advance is the timer-driven transition: drawing → guessing → reveal. Reveal is
+// host-driven (no timer), so it isn't handled here.
 func (r *Room) advance() {
 	switch r.state.Phase {
-	case PhaseInRound:
-		r.state.Phase = PhaseReveal
-	case PhaseReveal:
-		r.state.Phase = PhaseEnded
+	case PhaseDrawing:
+		r.beginGuessing()
+	case PhaseGuessing:
+		r.beginReveal()
 	}
 }
 
-func (r *Room) addSub(ch chan GameState) {
+func (r *Room) beginGuessing() {
+	r.state.Featured = r.pickFeatured()
+	r.startPhase(PhaseGuessing, r.state.GuessMs)
+}
+
+// pickFeatured chooses the single artist whose drawing is shown this round. It
+// prefers, in order: a not-yet-featured player who actually drew something, then
+// any not-yet-featured player, then anyone who drew, then anyone — so coverage
+// spreads across rounds without showing a blank canvas when it's avoidable.
+func (r *Room) pickFeatured() string {
+	if len(r.state.Players) == 0 {
+		return ""
+	}
+	past := make(map[string]bool, len(r.state.FeaturedPast))
+	for _, n := range r.state.FeaturedPast {
+		past[n] = true
+	}
+	drew := func(name string) bool { return len(r.state.Drawings[name]) > 0 }
+
+	var freshDrew, fresh, anyDrew, all []string
+	for _, p := range r.state.Players {
+		all = append(all, p.Name)
+		if drew(p.Name) {
+			anyDrew = append(anyDrew, p.Name)
+		}
+		if !past[p.Name] {
+			fresh = append(fresh, p.Name)
+			if drew(p.Name) {
+				freshDrew = append(freshDrew, p.Name)
+			}
+		}
+	}
+	for _, pick := range [][]string{freshDrew, fresh, anyDrew, all} {
+		if len(pick) > 0 {
+			return pick[rand.IntN(len(pick))]
+		}
+	}
+	return all[rand.IntN(len(all))]
+}
+
+// beginReveal scores the round (each correct guesser earns points) and opens the
+// host-advanced reveal phase.
+func (r *Room) beginReveal() {
+	for guesser, guess := range r.state.Guesses {
+		if guess != r.state.Featured || guesser == r.state.Featured {
+			continue
+		}
+		if i := r.state.playerIndex(guesser); i >= 0 {
+			r.state.Players[i].Score += pointsPerCorrect
+		}
+	}
+	if r.state.Featured != "" {
+		r.state.FeaturedPast = append(r.state.FeaturedPast, r.state.Featured)
+	}
+	r.startPhase(PhaseReveal, 0)
+}
+
+func (r *Room) endGame() {
+	r.phaseGen++
+	r.state.Phase = PhaseEnded
+	r.state.PhaseEndsAt = 0
+	// Drop transient round data so the final scoreboard view carries no leftovers.
+	r.state.Prompt = ""
+	r.state.Drawings = nil
+	r.state.Guesses = nil
+	r.state.Featured = ""
+}
+
+// startPhase sets the phase, bumps the generation, and arms the advance timer for
+// timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown.
+func (r *Room) startPhase(p Phase, durMs int) {
+	r.state.Phase = p
+	r.phaseGen++
+	if durMs > 0 {
+		d := time.Duration(durMs) * time.Millisecond
+		r.state.PhaseEndsAt = time.Now().Add(d).UnixMilli()
+		r.armAdvance(r.phaseGen, d)
+	} else {
+		r.state.PhaseEndsAt = 0
+	}
+}
+
+func (r *Room) submitDrawing(c Command) {
+	if r.state.Phase != PhaseDrawing || r.state.playerIndex(c.Player) < 0 {
+		return
+	}
+	if r.state.Drawings == nil {
+		r.state.Drawings = map[string][]Stroke{}
+	}
+	r.state.Drawings[c.Player] = sanitizeStrokes(c.Strokes)
+	if r.allDrawn() {
+		r.beginGuessing() // everyone's in — don't wait out the timer
+	}
+}
+
+func (r *Room) submitGuess(c Command) {
+	if r.state.Phase != PhaseGuessing {
+		return
+	}
+	if c.Player == r.state.Featured { // the artist doesn't guess their own drawing
+		return
+	}
+	if r.state.playerIndex(c.Player) < 0 || r.state.playerIndex(c.Guess) < 0 {
+		return // unknown guesser, or a guess that isn't a real player
+	}
+	if r.state.Guesses == nil {
+		r.state.Guesses = map[string]string{}
+	}
+	r.state.Guesses[c.Player] = c.Guess
+	if r.allGuessed() {
+		r.beginReveal()
+	}
+}
+
+// allDrawn reports whether every connected player has submitted a drawing.
+// Disconnected players (in their grace window) don't block the round.
+func (r *Room) allDrawn() bool {
+	for _, p := range r.state.Players {
+		if pr, ok := r.present[p.Name]; ok && pr.connected {
+			if _, drawn := r.state.Drawings[p.Name]; !drawn {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// allGuessed reports whether every connected non-artist player has guessed.
+func (r *Room) allGuessed() bool {
+	for _, p := range r.state.Players {
+		if p.Name == r.state.Featured {
+			continue
+		}
+		if pr, ok := r.present[p.Name]; ok && pr.connected {
+			if _, guessed := r.state.Guesses[p.Name]; !guessed {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (r *Room) connectedCount() int {
+	n := 0
+	for _, p := range r.present {
+		if p.connected {
+			n++
+		}
+	}
+	return n
+}
+
+// --- subscription / broadcast / persistence -------------------------------
+
+func (r *Room) addSub(name string, ch chan GameState) {
 	if ch != nil {
-		r.subs = append(r.subs, ch)
+		r.subs = append(r.subs, subscriber{name: name, ch: ch})
 	}
 }
 
@@ -323,17 +657,19 @@ func (r *Room) unsubscribe(ch chan GameState) {
 		return
 	}
 	for i, s := range r.subs {
-		if s == ch {
+		if s.ch == ch {
 			r.subs = append(r.subs[:i], r.subs[i+1:]...)
 			return
 		}
 	}
 }
 
+// broadcast hands each subscriber its own redacted view of the state.
 func (r *Room) broadcast() {
 	for _, s := range r.subs {
+		view := r.state.viewFor(s.name, r.present)
 		select {
-		case s <- r.state:
+		case s.ch <- view:
 		default: // drop for a slow/closed subscriber rather than block the room
 		}
 	}
@@ -355,4 +691,98 @@ func (r *Room) persist() {
 	if err := r.snap.SaveSnapshot(ctx, r.state.Code, data); err != nil {
 		log.Printf("room %s save snapshot: %v", r.state.Code, err)
 	}
+}
+
+// --- validation / sanitization --------------------------------------------
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func clampF(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// sanitizeCategories trims, de-dupes, length-caps, and count-caps host-supplied
+// prompt words. Rendering is React-escaped, so this is about bounding size and
+// keeping the pool sane rather than XSS.
+func sanitizeCategories(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, c := range in {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if utf8.RuneCountInString(c) > maxCategoryLen {
+			c = string([]rune(c)[:maxCategoryLen])
+		}
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		out = append(out, c)
+		if len(out) >= maxCustomCategories {
+			break
+		}
+	}
+	return out
+}
+
+// sanitizeStrokes bounds an incoming drawing: caps strokes, points-per-stroke,
+// and total points; clamps widths and coordinates; and validates colors.
+func sanitizeStrokes(in []Stroke) []Stroke {
+	if len(in) > maxStrokes {
+		in = in[:maxStrokes]
+	}
+	out := make([]Stroke, 0, len(in))
+	total := 0
+	for _, s := range in {
+		pts := s.Points
+		if len(pts) == 0 {
+			continue
+		}
+		if len(pts) > maxPointsPerStroke {
+			pts = pts[:maxPointsPerStroke]
+		}
+		clean := make([]Point, 0, len(pts))
+		for _, p := range pts {
+			if total >= maxPointsTotal {
+				break
+			}
+			clean = append(clean, Point{X: clampF(p.X, 0, canvasW), Y: clampF(p.Y, 0, canvasH)})
+			total++
+		}
+		if len(clean) == 0 {
+			continue
+		}
+		out = append(out, Stroke{
+			Color:  sanitizeColor(s.Color),
+			Width:  clampF(s.Width, minStrokeWidth, maxStrokeWidth),
+			Points: clean,
+		})
+		if total >= maxPointsTotal {
+			break
+		}
+	}
+	return out
+}
+
+func sanitizeColor(c string) string {
+	if hexColor.MatchString(c) {
+		return c
+	}
+	return defaultStrokeColor
 }

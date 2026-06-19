@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
 import { SOCKET_URL } from "@/lib/config";
-import type { GameState, ServerError } from "@/lib/protocol";
+import type {
+  GameConfig,
+  GameState,
+  ServerError,
+  Stroke,
+} from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 
 // useGameSocket connects to the room over Socket.IO, joins as `name`, and feeds
@@ -43,10 +48,19 @@ export function useGameSocket(code: string, name: string) {
   }, []);
 
   return {
+    configure: useCallback(
+      (config: GameConfig) => emit("configure", config),
+      [emit],
+    ),
     start: useCallback(() => emit("start"), [emit]),
     nextPhase: useCallback(() => emit("nextPhase"), [emit]),
-    submitAnswer: useCallback(
-      (answer: string) => emit("submitAnswer", { answer }),
+    leave: useCallback(() => emit("leave"), [emit]),
+    submitDrawing: useCallback(
+      (strokes: Stroke[]) => emit("submitDrawing", { strokes }),
+      [emit],
+    ),
+    submitGuess: useCallback(
+      (artist: string) => emit("submitGuess", { artist }),
       [emit],
     ),
   };

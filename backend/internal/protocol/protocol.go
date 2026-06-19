@@ -6,20 +6,22 @@ import "encoding/json"
 
 type MsgType string
 
-// Commands (client → server).
+// Commands (client → server). These mirror the Socket.IO event names the
+// realtime bridge listens for; the bridge dispatches them to game.Command.
 const (
-	CmdJoin         MsgType = "join"
-	CmdLeave        MsgType = "leave"
-	CmdStart        MsgType = "start"
-	CmdSubmitAnswer MsgType = "submitAnswer"
-	CmdNextPhase    MsgType = "nextPhase"
+	CmdJoin          MsgType = "join"
+	CmdConfigure     MsgType = "configure"
+	CmdStart         MsgType = "start"
+	CmdSubmitDrawing MsgType = "submitDrawing"
+	CmdSubmitGuess   MsgType = "submitGuess"
+	CmdNextPhase     MsgType = "nextPhase"
+	CmdLeave         MsgType = "leave"
 )
 
 // Events (server → client).
 const (
-	EvtState     MsgType = "state"
-	EvtError     MsgType = "error"
-	EvtGameEnded MsgType = "gameEnded"
+	EvtState MsgType = "state"
+	EvtError MsgType = "error"
 )
 
 // Envelope is the wire format for every message in both directions.
@@ -30,10 +32,11 @@ type Envelope struct {
 
 // Command payloads.
 type JoinPayload struct {
-	Player string `json:"player"`
+	Code string `json:"code"`
+	Name string `json:"name"`
 }
-type SubmitAnswerPayload struct {
-	Answer string `json:"answer"`
+type SubmitGuessPayload struct {
+	Artist string `json:"artist"`
 }
 
 // Event payloads.

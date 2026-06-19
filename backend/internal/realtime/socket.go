@@ -44,12 +44,15 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 	c := &conn{sock: sock}
 
 	sock.On("join", func(args ...any) { c.join(h, args) })
-	sock.On("start", func(...any) { c.submit(game.CmdStart, "") })
-	sock.On("nextPhase", func(...any) { c.submit(game.CmdNextPhase, "") })
-	sock.On("submitAnswer", func(args ...any) {
-		c.submit(game.CmdSubmitAnswer, stringField(args, "answer"))
+	sock.On("configure", func(args ...any) { c.configure(args) })
+	sock.On("start", func(...any) { c.submit(game.Command{Kind: game.CmdStart}) })
+	sock.On("nextPhase", func(...any) { c.submit(game.Command{Kind: game.CmdNextPhase}) })
+	sock.On("submitDrawing", func(args ...any) { c.submitDrawing(args) })
+	sock.On("submitGuess", func(args ...any) {
+		c.submit(game.Command{Kind: game.CmdSubmitGuess, Guess: strings.TrimSpace(stringField(args, "artist"))})
 	})
-	sock.On("disconnect", func(...any) { c.leave() })
+	sock.On("leave", func(...any) { c.leaveRoom() })
+	sock.On("disconnect", func(...any) { c.onDisconnect() })
 }
 
 func (c *conn) join(h *hub.Hub, args []any) {
@@ -108,22 +111,58 @@ func (c *conn) join(h *hub.Hub, args []any) {
 	}()
 }
 
-// submit forwards a player command to the joined room. Commands before a
-// successful join are dropped.
-func (c *conn) submit(kind game.CmdKind, answer string) {
+// submit forwards a player command to the joined room, stamping it with this
+// socket's player name. Commands before a successful join are dropped.
+func (c *conn) submit(cmd game.Command) {
 	c.mu.Lock()
 	room, player := c.room, c.player
 	c.mu.Unlock()
 	if room == nil {
 		return
 	}
-	room.Submit(game.Command{Kind: kind, Player: player, Answer: answer})
+	cmd.Player = player
+	room.Submit(cmd)
 }
 
-// leave tears down the room subscription on disconnect. A single CmdDisconnect
-// both unsubscribes the channel and marks the player not-connected (arming the
-// room's grace timer), then we stop the write pump.
-func (c *conn) leave() {
+// configure forwards a host's lobby settings. The room ignores it unless the
+// sender is the host and the game is still in the lobby, and clamps every value.
+func (c *conn) configure(args []any) {
+	var cfg game.Config
+	if !decodeArg(args, &cfg) {
+		return
+	}
+	c.submit(game.Command{Kind: game.CmdConfigure, Config: &cfg})
+}
+
+// submitDrawing forwards a player's strokes. The room sanitizes and bounds them.
+func (c *conn) submitDrawing(args []any) {
+	var payload struct {
+		Strokes []game.Stroke `json:"strokes"`
+	}
+	if !decodeArg(args, &payload) {
+		return
+	}
+	c.submit(game.Command{Kind: game.CmdSubmitDrawing, Strokes: payload.Strokes})
+}
+
+// onDisconnect tears down the room subscription when the socket drops. A single
+// CmdDisconnect both unsubscribes the channel and marks the player
+// not-connected (arming the room's grace timer), so a refresh or brief network
+// blip doesn't eject them. Then we stop the write pump.
+func (c *conn) onDisconnect() {
+	c.detach(game.CmdDisconnect)
+}
+
+// leaveRoom handles an explicit Leave: the player is removed from the room
+// immediately (no grace), so host promotion / reaping happen right away. The
+// later socket disconnect then finds nothing attached and is a no-op.
+func (c *conn) leaveRoom() {
+	c.detach(game.CmdLeave)
+}
+
+// detach clears this socket's room binding and submits the given teardown
+// command (CmdDisconnect for a drop, CmdLeave for an explicit leave).
+func (c *conn) detach(kind game.CmdKind) {
 	c.mu.Lock()
 	room, player, updates, done := c.room, c.player, c.updates, c.done
 	c.room, c.player, c.updates, c.done = nil, "", nil, nil
@@ -131,7 +170,7 @@ func (c *conn) leave() {
 	if room == nil {
 		return
 	}
-	room.Submit(game.Command{Kind: game.CmdDisconnect, Player: player, Unsub: updates})
+	room.Submit(game.Command{Kind: kind, Player: player, Unsub: updates})
 	close(done)
 }
 
@@ -147,6 +186,21 @@ func stateMap(s game.GameState) map[string]any {
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
 	return m
+}
+
+// decodeArg re-marshals the first event argument (a decoded JSON object) into a
+// typed struct. Returns false when there's no argument to decode. This keeps the
+// nested-payload parsing (strokes, config) declarative rather than groping
+// through map[string]any.
+func decodeArg(args []any, target any) bool {
+	if len(args) == 0 {
+		return false
+	}
+	b, err := json.Marshal(args[0])
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(b, target) == nil
 }
 
 // stringField pulls a string field from the first event argument, which the

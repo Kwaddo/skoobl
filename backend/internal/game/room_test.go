@@ -32,66 +32,139 @@ func nextState(t *testing.T, ch <-chan GameState) GameState {
 	}
 }
 
+// awaitPhase reads forward on a player's channel until it sees a broadcast in
+// the wanted phase, returning that view.
+func awaitPhase(t *testing.T, ch chan GameState, want Phase) GameState {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	var last Phase
+	for {
+		select {
+		case s := <-ch:
+			last = s.Phase
+			if s.Phase == want {
+				return s
+			}
+		case <-deadline:
+			t.Fatalf("never reached phase %q (last seen %q)", want, last)
+			return GameState{}
+		}
+	}
+}
+
 func TestRoomJoinAndStart(t *testing.T) {
 	r := NewRoom("abc123")
 	go r.Run()
 	defer r.Stop()
 
-	sub := make(chan GameState, 8)
-	r.Submit(Command{Kind: CmdJoin, Player: "alice", Subscribe: sub})
+	sub := make(chan GameState, 32)
+	joinOK(t, r, "alice", sub)
 	s := nextState(t, sub)
 	if s.Host != "alice" {
 		t.Fatalf("host = %q, want alice (first joiner)", s.Host)
 	}
-	if len(s.Players) != 1 {
-		t.Fatalf("players = %d, want 1", len(s.Players))
-	}
 
-	r.Submit(Command{Kind: CmdJoin, Player: "bob", Subscribe: make(chan GameState, 8)})
-	s = nextState(t, sub)
-	if len(s.Players) != 2 {
-		t.Fatalf("players = %d, want 2", len(s.Players))
-	}
-
-	// Non-host cannot start.
-	r.Submit(Command{Kind: CmdStart, Player: "bob"})
+	// Below minPlayers, even the host can't start.
+	joinOK(t, r, "bob", make(chan GameState, 8))
 	r.Submit(Command{Kind: CmdStart, Player: "alice"})
-	var phase Phase
-	for i := 0; i < 4; i++ {
-		s = nextState(t, sub)
-		phase = s.Phase
-		if phase == PhaseInRound {
-			break
-		}
+	if s := poke(t, r, sub); s.Phase != PhaseLobby {
+		t.Fatalf("phase = %q, want lobby (start needs %d players)", s.Phase, minPlayers)
 	}
-	if phase != PhaseInRound {
-		t.Fatalf("phase = %q, want inRound after host start", phase)
+
+	// With four players, the host starts the game into the drawing phase.
+	joinOK(t, r, "carol", make(chan GameState, 8))
+	joinOK(t, r, "dave", make(chan GameState, 8))
+	r.Submit(Command{Kind: CmdStart, Player: "bob"})   // non-host: ignored
+	r.Submit(Command{Kind: CmdStart, Player: "alice"}) // host: starts
+	got := awaitPhase(t, sub, PhaseDrawing)
+	if got.YourPrompt == "" {
+		t.Fatal("alice received no prompt to draw in the drawing phase")
 	}
 }
 
-func TestRoomSubmitAnswerOnlyInRound(t *testing.T) {
-	r := NewRoom("xyz789")
+func TestFullRoundFlowAndScoring(t *testing.T) {
+	r := NewRoom("flow1")
+	go r.Run()
+	defer r.Stop()
+
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "alice"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+
+	// Everyone submits a drawing → the round auto-advances to guessing.
+	for _, n := range names {
+		r.Submit(Command{Kind: CmdSubmitDrawing, Player: n, Strokes: []Stroke{
+			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
+		}})
+	}
+
+	// The featured artist is hidden in the shared view but flagged in their own.
+	artist := ""
+	for _, n := range names {
+		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
+			artist = n
+		}
+	}
+	if artist == "" {
+		t.Fatal("no featured artist surfaced in the guessing phase")
+	}
+
+	// Every non-artist guesses correctly → the round auto-advances to reveal.
+	for _, n := range names {
+		if n != artist {
+			r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: artist})
+		}
+	}
+
+	rev := awaitPhase(t, chans["alice"], PhaseReveal)
+	if rev.Reveal == nil || rev.Reveal.Artist != artist {
+		t.Fatalf("reveal = %+v, want artist %q", rev.Reveal, artist)
+	}
+	for _, p := range rev.Players {
+		want := pointsPerCorrect
+		if p.Name == artist {
+			want = 0 // the artist doesn't guess and scores nothing this round
+		}
+		if p.Score != want {
+			t.Fatalf("%s scored %d, want %d", p.Name, p.Score, want)
+		}
+	}
+}
+
+func TestConfigureAppliesAndClamps(t *testing.T) {
+	r := NewRoom("cfg1")
 	go r.Run()
 	defer r.Stop()
 
 	sub := make(chan GameState, 16)
-	r.Submit(Command{Kind: CmdJoin, Player: "alice", Subscribe: sub})
-	nextState(t, sub)
+	joinOK(t, r, "alice", sub)
 
-	r.Submit(Command{Kind: CmdSubmitAnswer, Player: "alice", Answer: "early"})
-	r.Submit(Command{Kind: CmdStart, Player: "alice"})
-
-	var got GameState
-	for i := 0; i < 4; i++ {
-		got = nextState(t, sub)
-		if got.Phase == PhaseInRound {
-			break
-		}
+	r.Submit(Command{Kind: CmdConfigure, Player: "alice", Config: &Config{
+		Rounds:     99, // clamped to maxRounds
+		Language:   LangAR,
+		DrawMs:     30_000,
+		GuessMs:    15_000,
+		Categories: []string{" apple ", "apple", "", "banana"}, // trim + dedupe + drop empty
+	}})
+	s := poke(t, r, sub)
+	if s.TotalRounds != maxRounds {
+		t.Fatalf("rounds = %d, want clamp to %d", s.TotalRounds, maxRounds)
 	}
-	r.Submit(Command{Kind: CmdSubmitAnswer, Player: "alice", Answer: "banana"})
-	got = nextState(t, sub)
-	if idx := got.playerIndex("alice"); idx < 0 || got.Players[idx].Answer != "banana" {
-		t.Fatalf("answer not recorded in round: %+v", got.Players)
+	if s.Language != LangAR {
+		t.Fatalf("language = %q, want ar", s.Language)
+	}
+	// Non-host configure is ignored.
+	joinOK(t, r, "bob", make(chan GameState, 8))
+	r.Submit(Command{Kind: CmdConfigure, Player: "bob", Config: &Config{Rounds: 1}})
+	if s := poke(t, r, sub); s.TotalRounds != maxRounds {
+		t.Fatalf("non-host configure changed rounds to %d", s.TotalRounds)
 	}
 }
 
@@ -150,8 +223,11 @@ func TestRoomPersistsAfterStateChange(t *testing.T) {
 }
 
 func TestNewRoomFromSnapshotRestoresState(t *testing.T) {
-	original := GameState{Code: "restore1", Phase: PhaseInRound, Host: "bob",
-		Players: []Player{{Name: "bob"}, {Name: "carol"}}}
+	// PhaseEndsAt far in the future so the resumed drawing timer doesn't fire
+	// during the test (we're asserting the restored phase, not the transition).
+	original := GameState{Code: "restore1", Phase: PhaseDrawing, Host: "bob",
+		PhaseEndsAt: 9_999_999_999_999,
+		Players:     []Player{{Name: "bob"}, {Name: "carol"}}}
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -167,7 +243,7 @@ func TestNewRoomFromSnapshotRestoresState(t *testing.T) {
 	// Joining a brand-new player triggers a broadcast carrying restored state.
 	r.Submit(Command{Kind: CmdJoin, Player: "dave", Subscribe: sub})
 	s := nextState(t, sub)
-	if s.Host != "bob" || s.Phase != PhaseInRound {
+	if s.Host != "bob" || s.Phase != PhaseDrawing {
 		t.Fatalf("restored state lost: host=%q phase=%q", s.Host, s.Phase)
 	}
 	if len(s.Players) != 3 {
@@ -279,6 +355,50 @@ func TestHostPromotionOnPrune(t *testing.T) {
 	s := poke(t, r, subB)
 	if s.Host != "bob" {
 		t.Fatalf("host = %q, want bob after alice pruned", s.Host)
+	}
+}
+
+func TestLeavePromotesHostImmediately(t *testing.T) {
+	// A long grace proves promotion comes from the explicit leave, not a prune.
+	r := NewRoom("leave1", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	subA := make(chan GameState, 16)
+	joinOK(t, r, "alice", subA) // alice is host
+	subB := make(chan GameState, 16)
+	joinOK(t, r, "bob", subB)
+
+	r.Submit(Command{Kind: CmdLeave, Player: "alice", Unsub: subA})
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case s := <-subB:
+			if s.playerIndex("alice") < 0 && s.Host == "bob" {
+				return // promoted immediately, no grace wait
+			}
+		case <-deadline:
+			t.Fatal("host not promoted to bob after alice left explicitly")
+		}
+	}
+}
+
+func TestLeaveReapsWhenEmpty(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("leave2", WithGrace(time.Hour),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinOK(t, r, "alice", sub)
+	r.Submit(Command{Kind: CmdLeave, Player: "alice", Unsub: sub})
+
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped after the last player left explicitly")
 	}
 }
 
