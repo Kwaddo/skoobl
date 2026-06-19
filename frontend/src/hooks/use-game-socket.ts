@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
 import { SOCKET_URL } from "@/lib/config";
-import type { GameState, ServerError } from "@/lib/protocol";
+import type {
+  GameConfig,
+  GameState,
+  ServerError,
+  Stroke,
+} from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 
 // useGameSocket connects to the room over Socket.IO, joins as `name`, and feeds
 // every "state" broadcast into the store. Socket.IO handles reconnection and
 // transport negotiation, so there's no manual backoff here.
-export function useGameSocket(code: string, name: string) {
+export function useGameSocket(
+  code: string,
+  name: string,
+  opts: { spectator?: boolean } = {},
+) {
   const socketRef = useRef<Socket | null>(null);
+  const spectator = opts.spectator ?? false;
 
   useEffect(() => {
     if (!code || !name) return;
@@ -21,7 +31,10 @@ export function useGameSocket(code: string, name: string) {
 
     socket.on("connect", () => {
       useGameStore.getState().setError(null);
-      socket.emit("join", { code, name });
+      socket.emit(
+        "join",
+        spectator ? { code, name, spectator: true } : { code, name },
+      );
     });
     socket.on("state", (s: GameState) => useGameStore.getState().applyState(s));
     socket.on("error", (e: ServerError) =>
@@ -36,18 +49,32 @@ export function useGameSocket(code: string, name: string) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [code, name]);
+  }, [code, name, spectator]);
 
   const emit = useCallback((event: string, payload?: unknown) => {
     socketRef.current?.emit(event, payload);
   }, []);
 
   return {
+    configure: useCallback(
+      (config: GameConfig) => emit("configure", config),
+      [emit],
+    ),
     start: useCallback(() => emit("start"), [emit]),
     nextPhase: useCallback(() => emit("nextPhase"), [emit]),
-    submitAnswer: useCallback(
-      (answer: string) => emit("submitAnswer", { answer }),
+    returnToLobby: useCallback(() => emit("returnToLobby"), [emit]),
+    leave: useCallback(() => emit("leave"), [emit]),
+    submitDrawing: useCallback(
+      (strokes: Stroke[]) => emit("submitDrawing", { strokes }),
+      [emit],
+    ),
+    submitGuess: useCallback(
+      (artist: string) => emit("submitGuess", { artist }),
       [emit],
     ),
   };
 }
+
+// GameActions is the imperative command surface returned by useGameSocket,
+// shared by the host and player stage components.
+export type GameActions = ReturnType<typeof useGameSocket>;

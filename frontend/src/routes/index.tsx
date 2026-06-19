@@ -7,7 +7,10 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
+type Tab = "join" | "host";
+
 function Home() {
+  const [tab, setTab] = useState<Tab>("join");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +44,11 @@ function Home() {
     navigate({ to: "/play/$code", params: { code: cleanCode } });
   };
 
+  const switchTab = (next: Tab) => {
+    setTab(next);
+    setError(null);
+  };
+
   return (
     <main className="grain-above relative mx-auto flex min-h-dvh w-full max-w-xl flex-col justify-center gap-10 px-6 py-12">
       {/* wordmark */}
@@ -54,7 +62,7 @@ function Home() {
           bl
         </h1>
         <p className="max-w-xs text-balance text-sm text-muted">
-          Spin up a room, share the code, and pile your friends into the lobby.
+          Draw the word, then guess who drew the one on screen.
         </p>
       </header>
 
@@ -63,11 +71,22 @@ function Home() {
         className="card-arcade rise flex flex-col gap-6 p-6 sm:p-8"
         style={{ "--d": "90ms" } as React.CSSProperties}
       >
+        {/* tabs */}
+        <div className="flex gap-1 rounded-2xl border-2 border-border bg-surface-2 p-1">
+          <TabButton active={tab === "join"} onClick={() => switchTab("join")}>
+            Join a room
+          </TabButton>
+          <TabButton active={tab === "host"} onClick={() => switchTab("host")}>
+            Host a game
+          </TabButton>
+        </div>
+
         <label className="flex flex-col gap-2">
           <span className="font-mono text-xs uppercase tracking-widest text-muted">
             Your name
           </span>
           <input
+            dir="auto"
             className="field px-4 py-3.5"
             placeholder="e.g. captain chaos"
             value={name}
@@ -76,47 +95,45 @@ function Home() {
               setName(e.target.value);
               if (error) setError(null);
             }}
-            onKeyDown={(e) => e.key === "Enter" && host()}
+            onKeyDown={(e) => e.key === "Enter" && (tab === "host" ? host() : join())}
           />
         </label>
+
+        {tab === "join" ? (
+          <label className="flex flex-col gap-2">
+            <span className="font-mono text-xs uppercase tracking-widest text-muted">
+              Room code
+            </span>
+            <input
+              className="field px-4 py-3.5 text-center font-mono text-lg uppercase tracking-[0.3em]"
+              placeholder="code"
+              value={code}
+              maxLength={6}
+              onChange={(e) => {
+                setCode(e.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && join()}
+            />
+          </label>
+        ) : (
+          <p className="rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted">
+            You'll get a room code to share once the lobby opens.
+          </p>
+        )}
 
         <button
           type="button"
           className="btn-key w-full px-6 py-4 text-lg"
-          onClick={host}
+          onClick={tab === "host" ? host : join}
           disabled={busy}
         >
-          {busy ? "Creating room…" : "Host a game"}
+          {tab === "host"
+            ? busy
+              ? "Creating room…"
+              : "Host a game"
+            : "Join room"}
         </button>
-
-        <div className="flex items-center gap-4 text-muted">
-          <span className="h-px flex-1 bg-border" />
-          <span className="font-mono text-xs uppercase tracking-widest">
-            or
-          </span>
-          <span className="h-px flex-1 bg-border" />
-        </div>
-
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <input
-            className="field px-4 py-3.5 text-center font-mono uppercase tracking-[0.3em] sm:flex-1"
-            placeholder="code"
-            value={code}
-            maxLength={6}
-            onChange={(e) => {
-              setCode(e.target.value);
-              if (error) setError(null);
-            }}
-            onKeyDown={(e) => e.key === "Enter" && join()}
-          />
-          <button
-            type="button"
-            className="btn-ghost px-6 py-3.5 sm:w-auto"
-            onClick={join}
-          >
-            Join room
-          </button>
-        </div>
 
         {error && (
           <p className="rounded-xl border-2 border-secondary/40 bg-secondary/10 px-4 py-3 text-center text-sm font-medium text-secondary">
@@ -132,5 +149,27 @@ function Home() {
         no app · no signup · just a code
       </p>
     </main>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+        active ? "bg-primary text-primary-foreground" : "text-muted hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

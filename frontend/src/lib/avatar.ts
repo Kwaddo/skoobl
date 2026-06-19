@@ -15,9 +15,18 @@ export function avatarColor(name: string): string {
   return PALETTE[Math.abs(h) % PALETTE.length];
 }
 
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0]?.[0] ?? "?";
-  const second = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return (first + second).toUpperCase();
+// A fun, deterministic icon per player — same name always gets the same critter,
+// so people are recognizable across the lobby, canvas, and scoreboard. Emoji
+// keep this self-contained (no external avatar service / network calls).
+const ICONS = [
+  "🦊", "🐼", "🐸", "🐵", "🦁", "🐯", "🐙", "🦄",
+  "🐳", "🐝", "🦖", "🐧", "🦉", "🐲", "🦋", "🐢",
+  "🐬", "🦜", "👾", "🤖", "👻", "🦀", "🦩", "🦦",
+  "🦥", "🐗", "🦝", "🐨", "🦔", "🐙",
+];
+
+export function avatarEmoji(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return ICONS[Math.abs(h) % ICONS.length];
 }
