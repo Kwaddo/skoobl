@@ -54,6 +54,7 @@ describe("useGameSocket", () => {
   it("forwards player actions as named events", () => {
     const { result } = renderHook(() => useGameSocket("abc123", "alice"));
     act(() => result.current.start());
+    act(() => result.current.returnToLobby());
     act(() => result.current.submitGuess("bob"));
     act(() =>
       result.current.submitDrawing([
@@ -61,13 +62,27 @@ describe("useGameSocket", () => {
       ]),
     );
     expect(MockSocket.last.emitted).toContainEqual({ event: "start" });
+    expect(MockSocket.last.emitted).toContainEqual({ event: "returnToLobby" });
     expect(MockSocket.last.emitted).toContainEqual({
       event: "submitGuess",
       payload: { artist: "bob" },
     });
     expect(MockSocket.last.emitted).toContainEqual({
       event: "submitDrawing",
-      payload: { strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 2 }] }] },
+      payload: {
+        strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 2 }] }],
+      },
+    });
+  });
+
+  it("emits a spectator join for the host", () => {
+    renderHook(() => useGameSocket("abc123", "tv", { spectator: true }));
+    act(() => MockSocket.last.fire("connect"));
+    const join = MockSocket.last.emitted.find((e) => e.event === "join");
+    expect(join?.payload).toEqual({
+      code: "abc123",
+      name: "tv",
+      spectator: true,
     });
   });
 

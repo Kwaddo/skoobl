@@ -57,28 +57,89 @@ func TestRoomJoinAndStart(t *testing.T) {
 	go r.Run()
 	defer r.Stop()
 
+	hostSub := make(chan GameState, 32)
+	joinSpec(t, r, "tv", hostSub)
+	if s := nextState(t, hostSub); s.Host != "tv" {
+		t.Fatalf("host = %q, want tv (spectator)", s.Host)
+	}
+
 	sub := make(chan GameState, 32)
 	joinOK(t, r, "alice", sub)
-	s := nextState(t, sub)
-	if s.Host != "alice" {
-		t.Fatalf("host = %q, want alice (first joiner)", s.Host)
-	}
-
-	// Below minPlayers, even the host can't start.
 	joinOK(t, r, "bob", make(chan GameState, 8))
-	r.Submit(Command{Kind: CmdStart, Player: "alice"})
-	if s := poke(t, r, sub); s.Phase != PhaseLobby {
+	joinOK(t, r, "carol", make(chan GameState, 8))
+
+	// Three players is below minPlayers; the host can't start, and the host is
+	// not itself counted as a player.
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	s := poke(t, r, sub)
+	if s.Phase != PhaseLobby {
 		t.Fatalf("phase = %q, want lobby (start needs %d players)", s.Phase, minPlayers)
 	}
+	if len(s.Players) != 3 {
+		t.Fatalf("players = %d, want 3 (host excluded)", len(s.Players))
+	}
 
-	// With four players, the host starts the game into the drawing phase.
-	joinOK(t, r, "carol", make(chan GameState, 8))
+	// A fourth player lets the host start into the drawing phase.
 	joinOK(t, r, "dave", make(chan GameState, 8))
-	r.Submit(Command{Kind: CmdStart, Player: "bob"})   // non-host: ignored
-	r.Submit(Command{Kind: CmdStart, Player: "alice"}) // host: starts
+	r.Submit(Command{Kind: CmdStart, Player: "alice"}) // non-host: ignored
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})    // host: starts
 	got := awaitPhase(t, sub, PhaseDrawing)
 	if got.YourPrompt == "" {
 		t.Fatal("alice received no prompt to draw in the drawing phase")
+	}
+}
+
+func TestSpectatorHostNotAPlayer(t *testing.T) {
+	r := NewRoom("spec1")
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", sub)
+	s := nextState(t, sub)
+	if s.Host != "tv" {
+		t.Fatalf("host = %q, want tv", s.Host)
+	}
+	if len(s.Players) != 0 {
+		t.Fatalf("players = %d, want 0 (host is not a player)", len(s.Players))
+	}
+}
+
+func TestSecondHostRejected(t *testing.T) {
+	r := NewRoom("spec2")
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 16))
+	// A second host with a different name is rejected.
+	ack := make(chan string, 1)
+	r.Submit(Command{Kind: CmdJoin, Player: "tv2", Spectator: true, Subscribe: make(chan GameState, 16), Ack: ack})
+	if msg := <-ack; msg == "" {
+		t.Fatal("a second host with a different name was accepted")
+	}
+}
+
+func TestPlayerCannotTakeHostName(t *testing.T) {
+	r := NewRoom("spec3")
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 16))
+	if msg := joinErr(t, r, "tv", make(chan GameState, 16)); msg == "" {
+		t.Fatal("a player took the host's reserved name")
+	}
+}
+
+func TestSpectatorCannotTakePlayerName(t *testing.T) {
+	r := NewRoom("spec4")
+	go r.Run()
+	defer r.Stop()
+
+	joinOK(t, r, "alice", make(chan GameState, 16))
+	ack := make(chan string, 1)
+	r.Submit(Command{Kind: CmdJoin, Player: "alice", Spectator: true, Subscribe: make(chan GameState, 16), Ack: ack})
+	if msg := <-ack; msg == "" {
+		t.Fatal("a spectator took an existing player's name")
 	}
 }
 
@@ -87,6 +148,7 @@ func TestFullRoundFlowAndScoring(t *testing.T) {
 	go r.Run()
 	defer r.Stop()
 
+	joinSpec(t, r, "tv", make(chan GameState, 64))
 	names := []string{"alice", "bob", "carol", "dave"}
 	chans := map[string]chan GameState{}
 	for _, n := range names {
@@ -95,7 +157,7 @@ func TestFullRoundFlowAndScoring(t *testing.T) {
 		joinOK(t, r, n, ch)
 	}
 
-	r.Submit(Command{Kind: CmdStart, Player: "alice"})
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
 	awaitPhase(t, chans["alice"], PhaseDrawing)
 
 	// Everyone submits a drawing → the round auto-advances to guessing.
@@ -138,15 +200,82 @@ func TestFullRoundFlowAndScoring(t *testing.T) {
 	}
 }
 
+func TestReturnToLobbyResetsAndAllowsRestart(t *testing.T) {
+	r := NewRoom("relobby")
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 64))
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	// Run a one-round game through to the ended phase.
+	r.Submit(Command{Kind: CmdConfigure, Player: "tv", Config: &Config{
+		Rounds: 1, DrawMs: 30_000, GuessMs: 15_000,
+	}})
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+	for _, n := range names {
+		r.Submit(Command{Kind: CmdSubmitDrawing, Player: n, Strokes: []Stroke{
+			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+		}})
+	}
+	artist := ""
+	for _, n := range names {
+		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
+			artist = n
+		}
+	}
+	for _, n := range names {
+		if n != artist {
+			r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: artist})
+		}
+	}
+	awaitPhase(t, chans["alice"], PhaseReveal)
+	r.Submit(Command{Kind: CmdNextPhase, Player: "tv"}) // last round → ended
+	awaitPhase(t, chans["alice"], PhaseEnded)
+
+	// A non-host cannot send everyone back to the lobby.
+	r.Submit(Command{Kind: CmdReturnToLobby, Player: "alice"})
+	if s := poke(t, r, chans["bob"]); s.Phase != PhaseEnded {
+		t.Fatalf("non-host returned the room to lobby: phase=%q", s.Phase)
+	}
+
+	// The host returns everyone to the lobby with a clean slate.
+	r.Submit(Command{Kind: CmdReturnToLobby, Player: "tv"})
+	s := awaitPhase(t, chans["alice"], PhaseLobby)
+	if s.Round != 0 {
+		t.Fatalf("round = %d, want 0 after return to lobby", s.Round)
+	}
+	if len(s.Players) != 4 {
+		t.Fatalf("players = %d, want 4 kept", len(s.Players))
+	}
+	for _, p := range s.Players {
+		if p.Score != 0 {
+			t.Fatalf("%s score = %d, want 0 after return to lobby", p.Name, p.Score)
+		}
+	}
+
+	// And the host can immediately start a fresh game.
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+}
+
 func TestConfigureAppliesAndClamps(t *testing.T) {
 	r := NewRoom("cfg1")
 	go r.Run()
 	defer r.Stop()
 
 	sub := make(chan GameState, 16)
-	joinOK(t, r, "alice", sub)
+	joinSpec(t, r, "tv", sub)
+	joinOK(t, r, "alice", make(chan GameState, 16))
 
-	r.Submit(Command{Kind: CmdConfigure, Player: "alice", Config: &Config{
+	r.Submit(Command{Kind: CmdConfigure, Player: "tv", Config: &Config{
 		Rounds:     99, // clamped to maxRounds
 		Language:   LangAR,
 		DrawMs:     30_000,
@@ -160,9 +289,8 @@ func TestConfigureAppliesAndClamps(t *testing.T) {
 	if s.Language != LangAR {
 		t.Fatalf("language = %q, want ar", s.Language)
 	}
-	// Non-host configure is ignored.
-	joinOK(t, r, "bob", make(chan GameState, 8))
-	r.Submit(Command{Kind: CmdConfigure, Player: "bob", Config: &Config{Rounds: 1}})
+	// Non-host (a player) configure is ignored.
+	r.Submit(Command{Kind: CmdConfigure, Player: "alice", Config: &Config{Rounds: 1}})
 	if s := poke(t, r, sub); s.TotalRounds != maxRounds {
 		t.Fatalf("non-host configure changed rounds to %d", s.TotalRounds)
 	}
@@ -198,7 +326,7 @@ func TestRoomPersistsAfterStateChange(t *testing.T) {
 	defer r.Stop()
 
 	sub := make(chan GameState, 8)
-	r.Submit(Command{Kind: CmdJoin, Player: "alice", Subscribe: sub})
+	r.Submit(Command{Kind: CmdJoin, Player: "alice", Spectator: true, Subscribe: sub})
 	nextState(t, sub)
 
 	// Poll briefly: persist happens inside the room goroutine after broadcast.
@@ -275,6 +403,21 @@ func joinOK(t *testing.T, r *Room, name string, sub chan GameState) {
 	}
 }
 
+// joinSpec submits a spectator (host display) join and asserts acceptance.
+func joinSpec(t *testing.T, r *Room, name string, sub chan GameState) {
+	t.Helper()
+	ack := make(chan string, 1)
+	r.Submit(Command{Kind: CmdJoin, Player: name, Spectator: true, Subscribe: sub, Ack: ack})
+	select {
+	case msg := <-ack:
+		if msg != "" {
+			t.Fatalf("spectator join %q rejected: %q", name, msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("spectator join %q: no ack", name)
+	}
+}
+
 // joinErr submits a join and returns the rejection message ("" means accepted).
 func joinErr(t *testing.T, r *Room, name string, sub chan GameState) string {
 	t.Helper()
@@ -339,48 +482,90 @@ func TestPruneAfterGrace(t *testing.T) {
 	}
 }
 
-func TestHostPromotionOnPrune(t *testing.T) {
-	r := NewRoom("promo1", WithGrace(20*time.Millisecond))
+func TestRoomNotReapedWhileHostConnected(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("hostlive", WithGrace(20*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
 	go r.Run()
 	defer r.Stop()
 
-	subA := make(chan GameState, 16)
-	joinOK(t, r, "alice", subA) // alice becomes host
-	subB := make(chan GameState, 16)
-	joinOK(t, r, "bob", subB)
-
-	r.Submit(Command{Kind: CmdDisconnect, Player: "alice", Unsub: subA})
-	time.Sleep(60 * time.Millisecond)
-
-	s := poke(t, r, subB)
-	if s.Host != "bob" {
-		t.Fatalf("host = %q, want bob after alice pruned", s.Host)
+	joinSpec(t, r, "tv", make(chan GameState, 16)) // cancels the creation timer
+	select {
+	case <-reaped:
+		t.Fatal("room reaped while the host was still connected")
+	case <-time.After(80 * time.Millisecond):
 	}
 }
 
-func TestLeavePromotesHostImmediately(t *testing.T) {
-	// A long grace proves promotion comes from the explicit leave, not a prune.
-	r := NewRoom("leave1", WithGrace(time.Hour))
+func TestRoomReapedWhenHostDisconnects(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("hostgone", WithGrace(20*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
 	go r.Run()
 	defer r.Stop()
 
-	subA := make(chan GameState, 16)
-	joinOK(t, r, "alice", subA) // alice is host
-	subB := make(chan GameState, 16)
-	joinOK(t, r, "bob", subB)
+	sub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", sub)
+	r.Submit(Command{Kind: CmdDisconnect, Player: "tv", Unsub: sub})
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped after the host disconnected past grace")
+	}
+}
 
-	r.Submit(Command{Kind: CmdLeave, Player: "alice", Unsub: subA})
+func TestRoomReapedWhenHostLeaves(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("hostleave", WithGrace(time.Hour),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
 
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case s := <-subB:
-			if s.playerIndex("alice") < 0 && s.Host == "bob" {
-				return // promoted immediately, no grace wait
-			}
-		case <-deadline:
-			t.Fatal("host not promoted to bob after alice left explicitly")
-		}
+	sub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", sub)
+	r.Submit(Command{Kind: CmdLeave, Player: "tv", Unsub: sub})
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped after the host left explicitly")
+	}
+}
+
+func TestPlayersRemainButHostGoneReaps(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("hostreq", WithGrace(20*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	hostSub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", hostSub)
+	joinOK(t, r, "alice", make(chan GameState, 16)) // a player stays
+
+	r.Submit(Command{Kind: CmdDisconnect, Player: "tv", Unsub: hostSub})
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped after the required host disconnected, players present")
+	}
+}
+
+func TestHostReconnectKeepsRoom(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("hostrecon", WithGrace(40*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", sub)
+	r.Submit(Command{Kind: CmdDisconnect, Player: "tv", Unsub: sub})
+	sub2 := make(chan GameState, 16)
+	joinSpec(t, r, "tv", sub2) // reconnect before grace expires
+	select {
+	case <-reaped:
+		t.Fatal("room reaped despite the host reconnecting before grace")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

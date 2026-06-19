@@ -24,9 +24,11 @@ const (
 	CmdSubmitDrawing // player: submit strokes during the drawing phase
 	CmdSubmitGuess   // player: guess the artist during the guessing phase
 	CmdNextPhase     // host: reveal → next round / ended
+	CmdReturnToLobby // host: ended → lobby (play again, keep players)
 	CmdAdvance       // internal, timer-driven phase advance
 	CmdPrune
 	CmdReapIfEmpty
+	CmdHostPrune // internal: host display gone past grace → reap
 )
 
 // Tunables.
@@ -97,6 +99,7 @@ type Command struct {
 	Kind      CmdKind
 	Player    string
 	Subscribe chan GameState // join: per-client broadcast channel
+	Spectator bool           // join: true for the host display (non-playing)
 	Unsub     chan GameState // disconnect: channel to drop from the sub set
 	Ack       chan string    // join: "" on accept, else a rejection message
 	Gen       int            // prune/advance: generation captured when the timer was armed
@@ -121,7 +124,8 @@ type Room struct {
 	subs     []subscriber
 	snap     Snapshotter
 	present  map[string]*presence
-	phaseGen int // bumped on every phase change; stale advance timers self-cancel
+	host     *presence // the single host-display (spectator); nil until one joins
+	phaseGen int       // bumped on every phase change; stale advance timers self-cancel
 
 	grace      time.Duration
 	onReap     func()
@@ -213,7 +217,11 @@ func (r *Room) Run() {
 // abandoned restored rooms reap while reconnecting clients save themselves. A
 // restored mid-round resumes its phase timer so the game doesn't stall.
 func (r *Room) onStart() {
-	if len(r.state.Players) == 0 {
+	if r.state.Host != "" {
+		r.host = &presence{connected: false, gen: 1}
+		r.armHostPrune(r.host.gen)
+	}
+	if len(r.state.Players) == 0 && r.state.Host == "" {
 		r.armEmptyTimer()
 		return
 	}
@@ -280,7 +288,11 @@ func (r *Room) handle(c Command) {
 	case CmdPrune:
 		r.prune(c)
 	case CmdReapIfEmpty:
-		if len(r.state.Players) == 0 {
+		if len(r.state.Players) == 0 && !r.hostConnected() {
+			r.reap()
+		}
+	case CmdHostPrune:
+		if r.host != nil && !r.host.connected && r.host.gen == c.Gen {
 			r.reap()
 		}
 	case CmdConfigure:
@@ -303,6 +315,10 @@ func (r *Room) handle(c Command) {
 				r.endGame()
 			}
 		}
+	case CmdReturnToLobby:
+		if c.Player == r.state.Host && r.state.Phase == PhaseEnded {
+			r.returnToLobby()
+		}
 	case CmdAdvance:
 		if c.Gen == r.phaseGen {
 			r.advance()
@@ -311,6 +327,10 @@ func (r *Room) handle(c Command) {
 }
 
 func (r *Room) join(c Command) {
+	if c.Spectator {
+		r.joinSpectator(c)
+		return
+	}
 	name := c.Player
 	if r.state.Phase == PhaseEnded {
 		ack(c, "This game has already ended.")
@@ -318,6 +338,10 @@ func (r *Room) join(c Command) {
 	}
 	if utf8.RuneCountInString(name) > maxNameLen {
 		ack(c, "That name is too long.")
+		return
+	}
+	if name == r.state.Host {
+		ack(c, "That name's already taken in this room.")
 		return
 	}
 	if p, ok := r.present[name]; ok {
@@ -336,9 +360,6 @@ func (r *Room) join(c Command) {
 		ack(c, "This room is full.")
 		return
 	}
-	if r.state.Host == "" {
-		r.state.Host = name
-	}
 	r.state.Players = append(r.state.Players, Player{Name: name})
 	r.present[name] = &presence{connected: true}
 	r.addSub(name, c.Subscribe)
@@ -346,8 +367,55 @@ func (r *Room) join(c Command) {
 	ack(c, "")
 }
 
+// joinSpectator wires up the single host display: it claims the room's Host role
+// and subscribes for broadcasts, but is never added to Players — so it never
+// draws, guesses, scores, or counts toward minPlayers. A connected host with a
+// different name is rejected; the same name returning while disconnected
+// reconnects.
+func (r *Room) joinSpectator(c Command) {
+	name := c.Player
+	if r.state.Phase == PhaseEnded {
+		ack(c, "This game has already ended.")
+		return
+	}
+	if utf8.RuneCountInString(name) > maxNameLen {
+		ack(c, "That name is too long.")
+		return
+	}
+	if r.state.playerIndex(name) >= 0 {
+		ack(c, "That name's already taken in this room.")
+		return
+	}
+	if r.state.Host != "" && r.state.Host != name {
+		ack(c, "This room already has a host.")
+		return
+	}
+	if r.hostConnected() { // same name, but a host is already live (duplicate tab)
+		ack(c, "This room already has a host.")
+		return
+	}
+	if r.host == nil {
+		r.host = &presence{}
+	}
+	r.state.Host = name
+	r.host.connected = true
+	r.host.gen++ // invalidate any pending host prune
+	r.addSub(name, c.Subscribe)
+	r.cancelEmptyTimer()
+	ack(c, "")
+}
+
 func (r *Room) disconnect(c Command) {
 	r.unsubscribe(c.Unsub)
+	if r.host != nil && c.Player == r.state.Host {
+		if !r.host.connected {
+			return
+		}
+		r.host.connected = false
+		r.host.gen++
+		r.armHostPrune(r.host.gen)
+		return
+	}
 	p, ok := r.present[c.Player]
 	if !ok || !p.connected {
 		return
@@ -355,6 +423,16 @@ func (r *Room) disconnect(c Command) {
 	p.connected = false
 	p.gen++
 	r.armPrune(c.Player, p.gen)
+}
+
+// armHostPrune schedules a reap if the host display doesn't return within grace.
+// The host is required (it is the shared screen and holds all manual-advance
+// authority), so losing it ends the game. A captured gen makes a returned host
+// cancel the timer.
+func (r *Room) armHostPrune(gen int) {
+	time.AfterFunc(r.grace, func() {
+		r.Submit(Command{Kind: CmdHostPrune, Gen: gen})
+	})
 }
 
 func (r *Room) prune(c Command) {
@@ -365,35 +443,34 @@ func (r *Room) prune(c Command) {
 	r.removePlayer(c.Player)
 }
 
-// leave removes a player immediately at their own request (the Leave button),
-// skipping the disconnect grace. Host promotion and reaping apply just as they
-// do for a timed prune.
+// leave removes a participant immediately at their own request (the Leave
+// button), skipping the disconnect grace. A host leaving closes the shared
+// screen and ends the game; a player leaving reaps an emptied room.
 func (r *Room) leave(c Command) {
 	r.unsubscribe(c.Unsub)
+	if r.host != nil && c.Player == r.state.Host {
+		r.reap()
+		return
+	}
 	if _, ok := r.present[c.Player]; !ok {
 		return // never present, or already gone
 	}
 	r.removePlayer(c.Player)
 }
 
-// removePlayer drops a player from presence and the roster, promotes the
-// longest-present remaining player if the leaver was host, reaps an emptied
-// room, and lets a departure complete the current phase for those who remain.
+// removePlayer drops a player from presence and the roster, reaps a room that
+// has no players and no connected host, and lets a departure complete the
+// current phase for those who remain. The host is a spectator (never in
+// Players), so there is no host promotion here.
 func (r *Room) removePlayer(name string) {
 	delete(r.present, name)
 	if i := r.state.playerIndex(name); i >= 0 {
-		wasHost := r.state.Host == name
 		r.state.Players = append(r.state.Players[:i], r.state.Players[i+1:]...)
-		if wasHost {
-			if len(r.state.Players) > 0 {
-				r.state.Host = r.state.Players[0].Name // promote longest-present
-			} else {
-				r.state.Host = ""
-			}
-		}
 	}
 	if len(r.state.Players) == 0 {
-		r.reap()
+		if !r.hostConnected() {
+			r.reap()
+		}
 		return
 	}
 	switch r.state.Phase {
@@ -551,6 +628,24 @@ func (r *Room) endGame() {
 	r.state.Featured = ""
 }
 
+// returnToLobby sends a finished game back to the lobby for a fresh round,
+// keeping the players, host, and configured settings but zeroing scores and
+// clearing all round data. Lets a group play again without re-joining.
+func (r *Room) returnToLobby() {
+	r.phaseGen++
+	r.state.Phase = PhaseLobby
+	r.state.Round = 0
+	r.state.PhaseEndsAt = 0
+	r.state.Prompt = ""
+	r.state.Drawings = nil
+	r.state.Guesses = nil
+	r.state.Featured = ""
+	r.state.FeaturedPast = nil
+	for i := range r.state.Players {
+		r.state.Players[i].Score = 0
+	}
+}
+
 // startPhase sets the phase, bumps the generation, and arms the advance timer for
 // timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown.
 func (r *Room) startPhase(p Phase, durMs int) {
@@ -634,6 +729,9 @@ func (r *Room) connectedCount() int {
 	}
 	return n
 }
+
+// hostConnected reports whether the host display is currently attached.
+func (r *Room) hostConnected() bool { return r.host != nil && r.host.connected }
 
 // --- subscription / broadcast / persistence -------------------------------
 
