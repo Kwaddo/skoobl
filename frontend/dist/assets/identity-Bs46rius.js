@@ -1,1 +1,0 @@
-var e=`skoobl:name`;function t(t){sessionStorage.setItem(e,t)}function n(){return sessionStorage.getItem(e)??``}export{t as n,n as t};

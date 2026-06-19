@@ -1,1 +1,0 @@
-import{a as e}from"./useNavigate-CPxXS5_3.js";import{n as t}from"./index-BqynwM7D.js";import{t as n}from"./GameStage-DdK6XXTe.js";var r=e();function i(){let{code:e}=t.useParams();return(0,r.jsx)(n,{code:e})}export{i as component};

@@ -9,6 +9,10 @@ import type {
 } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 
+// Shown while the socket can't reach the server. Unlike a join rejection this is
+// transient (Socket.IO keeps retrying), so the UI treats it differently.
+export const CONNECTION_ERROR = "Can't reach the server — retrying…";
+
 // useGameSocket connects to the room over Socket.IO, joins as `name`, and feeds
 // every "state" broadcast into the store. Socket.IO handles reconnection and
 // transport negotiation, so there's no manual backoff here.
@@ -41,7 +45,7 @@ export function useGameSocket(
       useGameStore.getState().setError(e.message),
     );
     socket.on("connect_error", () =>
-      useGameStore.getState().setError("Can't reach the server — retrying…"),
+      useGameStore.getState().setError(CONNECTION_ERROR),
     );
 
     return () => {
