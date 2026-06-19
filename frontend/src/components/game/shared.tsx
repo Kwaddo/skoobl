@@ -1,8 +1,9 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { avatarColor, avatarEmoji } from "@/lib/avatar";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import type { Player } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
+import { Alert, Avatar, Check, Crown, Eyes, Sparkle, Trophy } from "./icons";
 
 // RoomHeader is the persistent top bar: who you are, the room code, the live
 // phase, and a Leave button. Shared by the host and player screens.
@@ -19,14 +20,9 @@ export function RoomHeader({
   const round = useGameStore((s) => s.round);
   const totalRounds = useGameStore((s) => s.totalRounds);
   return (
-    <header className="rise flex items-center justify-between gap-3">
+    <header className="rise flex shrink-0 items-center justify-between gap-3">
       <div className="flex items-center gap-3">
-        <span
-          className="flex h-11 w-11 items-center justify-center rounded-xl text-2xl"
-          style={{ backgroundColor: avatarColor(name) }}
-        >
-          {avatarEmoji(name)}
-        </span>
+        <Avatar name={name} className="h-11 w-11 rounded-xl" />
         <div className="flex flex-col">
           <span
             dir="auto"
@@ -41,13 +37,14 @@ export function RoomHeader({
       </div>
       <div className="flex items-center gap-2">
         <span className="hidden items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 sm:flex">
-          <span className="live-dot h-2 w-2 rounded-full bg-primary" />
+          <span className="live-dot h-2 w-2 rounded-full bg-foreground" />
           <span className="font-mono text-xs uppercase tracking-widest text-muted">
             {phase === "lobby" || phase === "ended"
               ? phase
               : `round ${round}/${totalRounds} · ${phase}`}
           </span>
         </span>
+        <ThemeToggle />
         <button
           type="button"
           onClick={onLeave}
@@ -70,7 +67,7 @@ export function CodeCard({ code }: { code: string }) {
     setTimeout(() => setCopied(false), 1400);
   };
   return (
-    <div className="card-arcade flex items-center justify-between gap-4 p-5">
+    <div className="card-arcade flex shrink-0 items-center justify-between gap-4 p-5">
       <div className="flex flex-col gap-1">
         <span className="font-mono text-xs uppercase tracking-widest text-muted">
           Room code
@@ -80,10 +77,10 @@ export function CodeCard({ code }: { code: string }) {
           onClick={copy}
           className="group flex items-center gap-3 text-left"
         >
-          <span className="font-mono text-3xl font-bold uppercase tracking-[0.2em] text-primary">
+          <span className="font-mono text-3xl font-bold uppercase tracking-[0.2em] text-foreground">
             {code}
           </span>
-          <span className="rounded-lg border border-border px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-muted transition-colors group-hover:border-primary group-hover:text-primary">
+          <span className="rounded-lg border border-border px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-muted transition-colors group-hover:border-foreground group-hover:text-foreground">
             {copied ? "copied!" : "copy"}
           </span>
         </button>
@@ -99,16 +96,15 @@ export function Scoreboard({ players }: { players: Player[] }) {
   return (
     <ol className="flex flex-col gap-2">
       {ranked.map((p, i) => (
-        <li key={p.name} className="card-arcade flex items-center gap-3 p-3">
+        <li
+          key={p.name}
+          className="card-arcade pop flex items-center gap-3 p-3"
+          style={{ "--d": `${i * 45}ms` } as React.CSSProperties}
+        >
           <span className="w-6 text-center font-display text-sm font-bold text-muted">
             {i + 1}
           </span>
-          <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg"
-            style={{ backgroundColor: avatarColor(p.name) }}
-          >
-            {avatarEmoji(p.name)}
-          </span>
+          <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
           <span
             dir="auto"
             className="flex min-w-0 flex-1 items-center gap-1.5 font-semibold"
@@ -122,14 +118,9 @@ export function Scoreboard({ players }: { players: Player[] }) {
             )}
           </span>
           {p.correct && (
-            <span
-              title="guessed correctly"
-              className="text-base font-bold text-[#7CFF6B]"
-            >
-              ✓
-            </span>
+            <Check className="h-4 w-4 text-foreground" />
           )}
-          <span className="font-mono text-sm font-bold text-primary">
+          <span className="font-mono text-sm font-bold text-foreground">
             {p.score ?? 0}
           </span>
         </li>
@@ -143,9 +134,9 @@ export function LeaderBadge() {
   return (
     <span
       title="leader"
-      className="flex items-center gap-1 rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-primary"
+      className="flex items-center gap-1 rounded-full border border-foreground/40 bg-foreground/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-foreground"
     >
-      👑 leader
+      <Crown className="h-3 w-3" /> leader
     </span>
   );
 }
@@ -156,7 +147,7 @@ export function PlayerGrid({ players }: { players: Player[] }) {
   if (players.length === 0) {
     return (
       <div className="card-arcade flex flex-col items-center gap-2 border-dashed px-6 py-10 text-center">
-        <span className="live-dot text-3xl">👀</span>
+        <Eyes className="float h-9 w-9 text-foreground" />
         <p className="font-display text-lg font-bold">Nobody here yet</p>
         <p className="text-sm text-muted">
           Share the code above to fill the room.
@@ -166,21 +157,20 @@ export function PlayerGrid({ players }: { players: Player[] }) {
   }
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {players.map((p) => (
-        <li key={p.name} className="card-arcade flex items-center gap-3 p-3">
-          <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-2xl"
-            style={{ backgroundColor: avatarColor(p.name) }}
-          >
-            {avatarEmoji(p.name)}
-          </span>
+      {players.map((p, i) => (
+        <li
+          key={p.name}
+          className="card-arcade card-hover pop flex items-center gap-3 p-3"
+          style={{ "--d": `${i * 40}ms` } as React.CSSProperties}
+        >
+          <Avatar name={p.name} className="h-10 w-10 rounded-xl" />
           <span className="flex min-w-0 flex-col">
             <span dir="auto" className="truncate font-semibold">
               {p.name}
             </span>
             {p.name === host && (
-              <span className="font-mono text-[10px] uppercase tracking-widest text-primary">
-                👑 leader
+              <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-foreground">
+                <Crown className="h-3 w-3" /> leader
               </span>
             )}
           </span>
@@ -201,30 +191,32 @@ export function Roster({
 }) {
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {players.map((p) => {
+      {players.map((p, i) => {
         const done = mode === "drawing" ? p.hasDrawn : p.hasGuessed;
-        const doneLabel = mode === "drawing" ? "✓ done" : "✓ guessed";
+        const doneLabel = mode === "drawing" ? "done" : "guessed";
         const waitLabel = mode === "drawing" ? "drawing…" : "thinking…";
         return (
           <li
             key={p.name}
-            className={`card-arcade flex items-center gap-3 p-3 transition-colors ${
-              done ? "border-primary" : "opacity-70"
+            className={`card-arcade pop flex items-center gap-3 p-3 ${
+              done ? "border-foreground" : "opacity-60"
             }`}
+            style={{ "--d": `${i * 40}ms` } as React.CSSProperties}
           >
-            <span
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-2xl"
-              style={{ backgroundColor: avatarColor(p.name) }}
-            >
-              {avatarEmoji(p.name)}
-            </span>
+            <Avatar name={p.name} className="h-10 w-10 rounded-xl" />
             <span className="flex min-w-0 flex-col">
               <span dir="auto" className="truncate font-semibold">
                 {p.name}
               </span>
-              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
-                {done ? doneLabel : waitLabel}
-              </span>
+              {done ? (
+                <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-foreground">
+                  <Check className="h-3 w-3" /> {doneLabel}
+                </span>
+              ) : (
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                  {waitLabel}
+                </span>
+              )}
             </span>
           </li>
         );
@@ -233,15 +225,15 @@ export function Roster({
   );
 }
 
-// Timer renders the remaining seconds, turning urgent under 5s.
+// Timer renders the remaining seconds, inverting and pounding under 5s.
 export function Timer({ remaining }: { remaining: number | null }) {
   if (remaining === null) return null;
   const low = remaining <= 5;
   return (
     <span
-      className={`flex h-12 w-12 items-center justify-center rounded-xl border-2 font-mono text-lg font-bold ${
+      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 font-mono text-lg font-bold transition-colors ${
         low
-          ? "border-secondary text-secondary"
+          ? "heartbeat border-foreground bg-foreground text-background"
           : "border-border text-foreground"
       }`}
     >
@@ -266,14 +258,20 @@ export function EndedStage({
   const youWon = winner?.name === name;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="card-arcade flex flex-col items-center gap-2 p-8 text-center">
-        <span className="text-4xl">{youWon ? "🏆" : "🎉"}</span>
+    <div className="m-auto flex w-full max-w-2xl max-h-full min-h-0 flex-col gap-5">
+      <div className="card-arcade flex shrink-0 flex-col items-center gap-2 p-8 text-center">
+        <span className="trophy-bounce text-foreground">
+          {youWon ? (
+            <Trophy className="h-12 w-12" />
+          ) : (
+            <Sparkle className="h-12 w-12" />
+          )}
+        </span>
         <h2 className="font-display text-2xl font-bold">Game over</h2>
         {winner && (
           <p className="text-sm text-muted">
             Winner:{" "}
-            <span dir="auto" className="font-display font-bold text-primary">
+            <span dir="auto" className="font-display font-bold text-foreground">
               {winner.name}
             </span>{" "}
             with {winner.score ?? 0} pts
@@ -281,20 +279,22 @@ export function EndedStage({
         )}
       </div>
 
-      <Scoreboard players={players} />
+      <div className="min-h-0 flex-1 overflow-auto pr-1">
+        <Scoreboard players={players} />
+      </div>
 
       {onPlayAgain ? (
         <button
           type="button"
-          className="btn-key w-full px-6 py-4 text-lg"
+          className="btn-key w-full shrink-0 px-6 py-4 text-lg"
           onClick={onPlayAgain}
         >
           Play again →
         </button>
       ) : (
-        <p className="text-center text-sm text-muted">
+        <p className="shrink-0 text-center text-sm text-muted">
           Waiting for the host to start a new game
-          <span className="live-dot ml-1 text-primary">●</span>
+          <span className="live-dot ml-1 text-foreground">●</span>
         </p>
       )}
     </div>
@@ -307,7 +307,7 @@ export function ErrorPanel({ message }: { message: string }) {
   return (
     <main className="grain-above mx-auto flex min-h-dvh w-full max-w-md flex-col items-center justify-center gap-6 px-6 text-center">
       <div className="card-arcade rise flex flex-col items-center gap-4 p-8">
-        <span className="text-4xl">🚫</span>
+        <Alert className="h-12 w-12 text-foreground" />
         <h1 className="font-display text-2xl font-bold">{message}</h1>
         <button
           type="button"

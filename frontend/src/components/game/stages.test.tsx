@@ -34,7 +34,8 @@ describe("stage split", () => {
   it("player shows a pick list during guessing, never the drawing", () => {
     useGameStore.setState({
       phase: "guessing",
-      players: [{ name: "ann" }, { name: "bob" }],
+      // bob drew something, so he's a valid "who drew this?" option
+      players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
       currentDrawing: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
       youAreArtist: false,
       yourGuess: "",
