@@ -3,6 +3,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { routeTree } from "./routeTree.gen";
 import "./index.css";
+// Ensure <html data-theme> is set even if the pre-paint inline script was
+// stripped (e.g. some embedded webviews). lib/theme reads it on import.
+import "./lib/theme";
 
 const router = createRouter({ routeTree });
 

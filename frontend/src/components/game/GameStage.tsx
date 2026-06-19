@@ -1,6 +1,7 @@
 import { Navigate, useNavigate } from "@tanstack/react-router";
-import { useCallback } from "react";
-import { useGameSocket } from "@/hooks/use-game-socket";
+import { useCallback, useEffect } from "react";
+import { CONNECTION_ERROR, useGameSocket } from "@/hooks/use-game-socket";
+import { setFlash } from "@/lib/flash";
 import { recallName } from "@/lib/identity";
 import { useGameStore } from "@/lib/store";
 import { HostStage } from "./HostStage";
@@ -27,18 +28,45 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
     navigate({ to: "/" });
   }, [actions, navigate]);
 
-  if (!name) return <Navigate to="/" />;
-  if (error) return <ErrorPanel message={error} />;
+  // Recoverable join rejections (name taken, wrong code, room full, …) shouldn't
+  // hijack the whole screen. Bounce back to the home form with a small inline
+  // message so the player can fix it and retry. Only a genuine can't-reach-the-
+  // server state keeps the full-screen panel.
+  const recoverable = !!error && error !== CONNECTION_ERROR;
+  useEffect(() => {
+    if (!recoverable || !error) return;
+    setFlash({
+      message: error,
+      tab: screen === "host" ? "host" : "join",
+      code,
+    });
+    useGameStore.getState().setError(null);
+    navigate({ to: "/" });
+  }, [recoverable, error, screen, code, navigate]);
 
-  const width = screen === "host" ? "max-w-4xl" : "max-w-md";
+  if (!name) return <Navigate to="/" />;
+  if (error === CONNECTION_ERROR) return <ErrorPanel message={error} />;
+  if (recoverable) return null;
+
+  // The host is a shared "TV": locked to the viewport height and never scrolls,
+  // so nothing jumps around for the players watching. The player is a phone
+  // controller: narrow and free to scroll.
+  const isHost = screen === "host";
+  // Both screens lock to the viewport and never scroll the page; each phase
+  // fits/centers/squeezes its own content. Host is a wide shared display, the
+  // player a narrower controller.
+  const shell = isHost
+    ? "mx-auto flex h-dvh w-full max-w-[1700px] flex-col gap-5 overflow-hidden px-6 py-5 sm:px-10"
+    : // narrow controller normally; when the window is short the canvas+tools go
+      // side-by-side, so widen it to give the canvas real room to grow.
+      "mx-auto flex h-dvh w-full max-w-xl flex-col gap-4 overflow-hidden px-5 py-5 short:max-w-5xl";
 
   return (
-    <main
-      className={`grain-above mx-auto flex min-h-dvh w-full ${width} flex-col gap-6 px-5 py-8`}
-    >
+    <main className={`grain-above ${shell}`}>
       <RoomHeader code={code} name={name} onLeave={handleLeave} />
-      <section className="flex flex-1 flex-col">
-        {screen === "host" ? (
+      <section className="flex min-h-0 flex-1 flex-col">
+        {/* phases below fill, centre, or scroll within this fixed area */}
+        {isHost ? (
           <HostStage name={name} actions={actions} />
         ) : (
           <PlayerStage name={name} actions={actions} />
