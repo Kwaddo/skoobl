@@ -67,6 +67,7 @@ function PlayerDrawing({ actions }: { actions: GameActions }) {
   const players = useGameStore((s) => s.players);
   const round = useGameStore((s) => s.round);
   const recordDrawing = useGameStore((s) => s.recordDrawing);
+  const connected = useGameStore((s) => s.connected);
   const remaining = useCountdown(endsAt);
   const [submitted, setSubmitted] = useState(false);
   const strokesRef = useRef<Stroke[]>([]);
@@ -78,10 +79,15 @@ function PlayerDrawing({ actions }: { actions: GameActions }) {
     });
   }, [actions]);
 
-  // Auto-submit whatever is on the canvas when the clock runs out.
+  // Auto-submit whatever is on the canvas when the clock runs out — but only
+  // while connected. During a server restart (deploy) the socket drops yet the
+  // local countdown keeps ticking; without this guard every client would hit 0
+  // mid-blackout and buffer a lock-in, flipping the host to "everyone done" the
+  // moment the new build resumes. On reconnect the server hands back a fresh
+  // deadline, so remaining is no longer 0 and no spurious submit fires.
   useEffect(() => {
-    if (remaining === 0 && !submitted) submit();
-  }, [remaining, submitted, submit]);
+    if (remaining === 0 && !submitted && connected) submit();
+  }, [remaining, submitted, submit, connected]);
 
   // Keep this round's final strokes for the player's own gallery + download,
   // even if they never tapped Lock-in (the cleanup fires when the round ends).
@@ -89,7 +95,7 @@ function PlayerDrawing({ actions }: { actions: GameActions }) {
     return () => recordDrawing(round, strokesRef.current);
   }, [round, recordDrawing]);
 
-  const drawn = players.filter((p) => p.hasDrawn).length;
+  const drawn = players.filter((p) => p.locked).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">

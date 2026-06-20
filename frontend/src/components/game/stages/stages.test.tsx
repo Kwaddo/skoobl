@@ -48,6 +48,78 @@ describe("stage split", () => {
     expect(getByText("bob")).toBeTruthy();
   });
 
+  it("host drawing roster counts locked-in players, not mere drafts", () => {
+    useGameStore.setState({
+      phase: "drawing",
+      // A draft is auto-saved on every stroke (hasDrawn flips true), but only a
+      // real lock-in (locked) should read as "finished". bob drafted but hasn't
+      // locked, so he must still show as drawing.
+      players: [
+        { name: "ann", hasDrawn: true, locked: true },
+        { name: "bob", hasDrawn: true, locked: false },
+      ],
+      yourPrompt: "cat",
+    });
+    const { getByText } = render(<HostStage name="tv" actions={noopActions} />);
+    expect(getByText("1 of 2 finished")).toBeTruthy();
+    expect(getByText("drawing…")).toBeTruthy();
+  });
+
+  it("auto-submits a drawing at time-up only while connected", () => {
+    const calls: number[] = [];
+    const actions = {
+      ...noopActions,
+      submitDrawing: () => calls.push(1),
+    } as unknown as GameActions;
+    // Deadline already passed → the countdown reads 0 on mount.
+    const past = Date.now() - 100_000;
+
+    // Mid-deploy blackout: the socket is down but the local clock still hits 0.
+    // No lock-in must fire, or every client buffers a submit during the restart.
+    useGameStore.setState({
+      phase: "drawing",
+      players: [{ name: "ann" }],
+      yourPrompt: "cat",
+      phaseEndsAt: past,
+      connected: false,
+    });
+    const offline = render(<PlayerStage name="ann" actions={actions} />);
+    expect(calls.length).toBe(0);
+    offline.unmount();
+
+    // Reconnected with the deadline genuinely past → the auto-submit fires.
+    useGameStore.setState({
+      phase: "drawing",
+      players: [{ name: "ann" }],
+      yourPrompt: "cat",
+      phaseEndsAt: past,
+      connected: true,
+    });
+    render(<PlayerStage name="ann" actions={actions} />);
+    expect(calls.length).toBe(1);
+  });
+
+  it("host guessing keeps who-guessed anonymous and counts non-artists", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      // bob is the hidden artist (never guesses). Showing a per-player "guessed"
+      // tick would expose him by elimination, so nobody is marked, and progress
+      // counts against the non-artist total (3 - 1 = 2).
+      players: [
+        { name: "ann", hasGuessed: true },
+        { name: "bob", hasGuessed: false },
+        { name: "cat", hasGuessed: false },
+      ],
+      currentDrawing: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+    });
+    const { getByText, queryByText } = render(
+      <HostStage name="tv" actions={noopActions} />,
+    );
+    expect(getByText("1/2 guessed")).toBeTruthy();
+    // No per-player "guessed ✓" badge anywhere in the roster.
+    expect(queryByText("guessed", { exact: true })).toBeNull();
+  });
+
   it("host ended screen offers Play again", () => {
     useGameStore.setState({
       phase: "ended",
