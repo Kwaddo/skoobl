@@ -1,0 +1,1 @@
+import{s as e}from"./theme-C31hdB3V.js";import{n as t}from"./index-z12sWRtl.js";import{t as n}from"./GameStage-D8SL-svw.js";var r=e();function i(){let{code:e}=t.useParams();return(0,r.jsx)(n,{code:e,screen:`player`})}export{i as component};

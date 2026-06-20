@@ -1,9 +1,10 @@
 import { Navigate, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CONNECTION_ERROR, useGameSocket } from "@/hooks/use-game-socket";
 import { setFlash } from "@/lib/flash";
 import { recallName } from "@/lib/identity";
 import { useGameStore } from "@/lib/store";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { HostStage } from "./HostStage";
 import { PlayerStage } from "./PlayerStage";
 import { ErrorPanel, RoomHeader } from "./shared";
@@ -26,11 +27,15 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
   const closed = useGameStore((s) => s.closed);
   const isHost = screen === "host";
   const inGame = phase !== "lobby" && phase !== "ended";
+  // Which confirmation modal is open (host-only destructive actions).
+  const [confirming, setConfirming] = useState<null | "leave" | "lobby">(null);
 
   // Leave now: tell the room (immediate host-close / player reap), then go home.
-  // The host leaving closes the room for everyone, so confirm before doing it.
+  // The host leaving closes the room for everyone, so confirm first (in-app
+  // modal). Players leave straight away — nothing to warn about.
   const handleLeave = useCallback(() => {
-    if (isHost && !window.confirm("Leave and close the room for everyone?")) {
+    if (isHost) {
+      setConfirming("leave");
       return;
     }
     actions.leave();
@@ -39,16 +44,17 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
 
   // Host-only: abandon the current game and send everyone back to the lobby
   // (scores reset). Stays in the room — nobody is kicked.
-  const handleBackToLobby = useCallback(() => {
-    if (
-      !window.confirm(
-        "End the current game and send everyone back to the lobby?",
-      )
-    ) {
-      return;
+  const handleBackToLobby = useCallback(() => setConfirming("lobby"), []);
+
+  const confirmAction = useCallback(() => {
+    if (confirming === "leave") {
+      actions.leave();
+      navigate({ to: "/" });
+    } else if (confirming === "lobby") {
+      actions.returnToLobby();
     }
-    actions.returnToLobby();
-  }, [actions]);
+    setConfirming(null);
+  }, [confirming, actions, navigate]);
 
   // The host left (or its display dropped past grace): the room is gone. Kick
   // the player to the main menu with a one-shot message in the home banner.
@@ -108,6 +114,23 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
           <PlayerStage name={name} actions={actions} />
         )}
       </section>
+
+      <ConfirmDialog
+        open={confirming === "leave"}
+        title="Close the room?"
+        message="Leaving ends the game for everyone in the room."
+        confirmLabel="Leave & close"
+        onConfirm={confirmAction}
+        onCancel={() => setConfirming(null)}
+      />
+      <ConfirmDialog
+        open={confirming === "lobby"}
+        title="End this game?"
+        message="Everyone goes back to the lobby and scores reset."
+        confirmLabel="Back to lobby"
+        onConfirm={confirmAction}
+        onCancel={() => setConfirming(null)}
+      />
     </main>
   );
 }
