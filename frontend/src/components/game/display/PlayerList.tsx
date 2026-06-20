@@ -53,9 +53,15 @@ export function Roster({
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {players.map((p, i) => {
-        const done = mode === "drawing" ? p.hasDrawn : p.hasGuessed;
-        const doneLabel = mode === "drawing" ? "done" : "guessed";
-        const waitLabel = mode === "drawing" ? "drawing…" : "thinking…";
+        // Drawing phase shows real per-player lock-in (p.locked, not p.hasDrawn:
+        // a draft is auto-saved on every stroke, so hasDrawn flips true long
+        // before a player actually locks in). Guessing phase must NOT reveal who
+        // has guessed — the artist never guesses, so a per-player "guessed ✓"
+        // would expose them by elimination. Everyone renders the same neutral
+        // state while guessing; progress is shown as an aggregate count instead.
+        const done = mode === "drawing" ? !!p.locked : false;
+        const doneLabel = "done";
+        const waitLabel = mode === "drawing" ? "drawing…" : "guessing…";
         return (
           <li
             key={p.name}

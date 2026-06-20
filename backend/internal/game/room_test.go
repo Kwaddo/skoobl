@@ -505,6 +505,36 @@ func TestNewRoomFromSnapshotRestoresState(t *testing.T) {
 	}
 }
 
+func TestRestoreExtendsExpiredPhaseDeadline(t *testing.T) {
+	// A deploy that overlaps the drawing deadline restores a phase whose
+	// PhaseEndsAt is already in the past. Resuming must NOT instantly advance
+	// (that flips the host to "everyone done" and trips client auto-submit); it
+	// re-stamps the deadline a fixed grace ahead so the round visibly resumes.
+	original := GameState{Code: "resume1", Phase: PhaseDrawing, Host: "bob",
+		PhaseEndsAt: time.Now().Add(-time.Minute).UnixMilli(),
+		Players:     []Player{{Name: "bob"}, {Name: "carol"}}}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	r, err := NewRoomFromSnapshot("resume1", data)
+	if err != nil {
+		t.Fatalf("NewRoomFromSnapshot: %v", err)
+	}
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 8)
+	r.Submit(Command{Kind: CmdJoin, Player: "dave", Subscribe: sub})
+	s := nextState(t, sub)
+	if s.Phase != PhaseDrawing {
+		t.Fatalf("phase = %q, want drawing (must not advance on resume)", s.Phase)
+	}
+	if left := time.Until(time.UnixMilli(s.PhaseEndsAt)); left < resumeGrace/2 {
+		t.Fatalf("resumed deadline only %s out, want ~%s (not extended)", left, resumeGrace)
+	}
+}
+
 func TestNilSnapshotterDoesNotPanic(t *testing.T) {
 	r := NewRoom("nilsnap") // snap is nil
 	go r.Run()

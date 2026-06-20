@@ -1,11 +1,14 @@
 import {
   type PointerEvent,
+  type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { HexColorInput, HexColorPicker } from "react-colorful";
+import { createPortal } from "react-dom";
 import {
   BRUSHES,
   CANVAS_H,
@@ -53,22 +56,6 @@ export function DrawingCanvas({
   useEffect(() => {
     onChange?.(strokes);
   }, [strokes, onChange]);
-
-  // Close either toolbar popover (color / stroke size) on an outside click.
-  useEffect(() => {
-    if (!paletteOpen && !sizeOpen) return;
-    const onDown = (e: Event) => {
-      const t = e.target as Node;
-      if (colorRef.current && !colorRef.current.contains(t)) {
-        setPaletteOpen(false);
-      }
-      if (penRef.current && !penRef.current.contains(t)) {
-        setSizeOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [paletteOpen, sizeOpen]);
 
   const toCanvas = useCallback((e: PointerEvent): Point => {
     const c = ref.current;
@@ -164,47 +151,50 @@ export function DrawingCanvas({
                   style={{ backgroundColor: color }}
                 />
               </button>
-              {paletteOpen && (
-                <div className="absolute bottom-full left-0 z-50 mb-2 w-52 rounded-xl border-2 border-border bg-surface-2 p-3 shadow-lg">
-                  <div className="grid grid-cols-4 gap-2">
-                    {PALETTE.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        aria-label={`color ${c}`}
-                        onClick={() => {
-                          setColor(c);
-                          setPaletteOpen(false);
-                        }}
-                        className={`h-7 w-7 rounded-full border-2 transition-transform ${
-                          color === c
-                            ? "scale-110 border-foreground"
-                            : "border-border hover:scale-105"
-                        }`}
-                        style={{ backgroundColor: c }}
-                      />
-                    ))}
-                  </div>
-                  {/* Universal in-app picker (react-colorful) — renders the same
-                      on every OS/browser, unlike the native <input type=color>. */}
-                  <div className="cc-picker mt-3">
-                    <HexColorPicker color={color} onChange={setColor} />
-                  </div>
-                  <div className="mt-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-muted">
-                    <span
-                      className="h-5 w-5 shrink-0 rounded-md border border-black/20"
-                      style={{ backgroundColor: color }}
+              <ToolPopover
+                open={paletteOpen}
+                anchorRef={colorRef}
+                width={208}
+                onClose={() => setPaletteOpen(false)}
+              >
+                <div className="grid grid-cols-4 gap-2">
+                  {PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      aria-label={`color ${c}`}
+                      onClick={() => {
+                        setColor(c);
+                        setPaletteOpen(false);
+                      }}
+                      className={`h-7 w-7 rounded-full border-2 transition-transform ${
+                        color === c
+                          ? "scale-110 border-foreground"
+                          : "border-border hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: c }}
                     />
-                    <HexColorInput
-                      color={color}
-                      onChange={setColor}
-                      prefixed
-                      aria-label="hex color"
-                      className="w-full rounded-md border-2 border-border bg-surface px-2 py-1 text-foreground uppercase tracking-widest outline-none focus:border-foreground"
-                    />
-                  </div>
+                  ))}
                 </div>
-              )}
+                {/* Universal in-app picker (react-colorful) — renders the same
+                      on every OS/browser, unlike the native <input type=color>. */}
+                <div className="cc-picker mt-3">
+                  <HexColorPicker color={color} onChange={setColor} />
+                </div>
+                <div className="mt-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-muted">
+                  <span
+                    className="h-5 w-5 shrink-0 rounded-md border border-black/20"
+                    style={{ backgroundColor: color }}
+                  />
+                  <HexColorInput
+                    color={color}
+                    onChange={setColor}
+                    prefixed
+                    aria-label="hex color"
+                    className="w-full rounded-md border-2 border-border bg-surface px-2 py-1 text-foreground uppercase tracking-widest outline-none focus:border-foreground"
+                  />
+                </div>
+              </ToolPopover>
             </div>
 
             {/* Pen — selecting it also opens a popover with the stroke-size
@@ -222,30 +212,33 @@ export function DrawingCanvas({
               >
                 <Brush className="h-5 w-5" />
               </ToolButton>
-              {sizeOpen && (
-                <div className="absolute bottom-full left-0 z-50 mb-2 w-44 rounded-xl border-2 border-border bg-surface-2 p-3 shadow-lg">
-                  <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-widest text-muted">
-                    <span>Size</span>
-                    <span className="text-foreground">{width}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={2}
-                    max={40}
-                    value={width}
-                    aria-label="stroke size"
-                    onChange={(e) => setWidth(Number(e.target.value))}
-                    className="w-full cursor-pointer accent-primary"
-                  />
-                  {/* Preview the actual stroke diameter (max 40px fits the popover). */}
-                  <div className="mt-2 flex h-11 items-center justify-center">
-                    <span
-                      className="rounded-full bg-foreground"
-                      style={{ width: `${width}px`, height: `${width}px` }}
-                    />
-                  </div>
+              <ToolPopover
+                open={sizeOpen}
+                anchorRef={penRef}
+                width={176}
+                onClose={() => setSizeOpen(false)}
+              >
+                <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-widest text-muted">
+                  <span>Size</span>
+                  <span className="text-foreground">{width}px</span>
                 </div>
-              )}
+                <input
+                  type="range"
+                  min={2}
+                  max={40}
+                  value={width}
+                  aria-label="stroke size"
+                  onChange={(e) => setWidth(Number(e.target.value))}
+                  className="w-full cursor-pointer accent-primary"
+                />
+                {/* Preview the actual stroke diameter (max 40px fits the popover). */}
+                <div className="mt-2 flex h-11 items-center justify-center">
+                  <span
+                    className="rounded-full bg-foreground"
+                    style={{ width: `${width}px`, height: `${width}px` }}
+                  />
+                </div>
+              </ToolPopover>
             </div>
             <ToolButton
               label="fill tool"
@@ -319,5 +312,101 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+// ToolPopover floats a toolbar panel (color presets / stroke size) above its
+// trigger. It renders through a portal to <body> with fixed positioning, so no
+// ancestor can clip it — not the toolbar's own scroll area in the short
+// (landscape) layout, nor the page's overflow-hidden shell. It opens above the
+// trigger, flips below when there isn't room, and clamps to the viewport edges,
+// so the whole panel always stays on-screen at any size. Dismisses on an outside
+// pointer or Escape.
+function ToolPopover({
+  open,
+  anchorRef,
+  width,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  anchorRef: RefObject<HTMLDivElement | null>;
+  width: number;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  // Measure the trigger + panel and pin the panel in fixed coordinates; keep it
+  // placed across resize/scroll (capture phase catches scrolls in any ancestor).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const a = anchorRef.current?.getBoundingClientRect();
+      const pop = popRef.current;
+      if (!a || !pop) return;
+      const m = 8;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const h = pop.offsetHeight;
+      // Prefer opening above the trigger; flip below if the top would clip.
+      let top = a.top - m - h;
+      if (top < m) {
+        const below = a.bottom + m;
+        top = below + h + m <= vh ? below : Math.max(m, vh - h - m);
+      }
+      // Align to the trigger's left edge, then clamp within the viewport.
+      const left = Math.max(m, Math.min(a.left, vw - width - m));
+      setPos({ left, top });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, anchorRef, width]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: Event) => {
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, anchorRef, onClose]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      ref={popRef}
+      style={{
+        left: pos?.left ?? 0,
+        top: pos?.top ?? 0,
+        width,
+        // Last-resort guard: on a viewport too short to hold the panel, scroll it
+        // internally rather than letting any part spill off-screen.
+        maxHeight: "calc(100dvh - 16px)",
+        // Hidden for the first layout pass (before its size is known) so it never
+        // flashes at the wrong spot, then revealed once positioned.
+        visibility: pos ? "visible" : "hidden",
+      }}
+      className="fixed z-50 overflow-y-auto rounded-xl border-2 border-border bg-surface-2 p-3 shadow-lg"
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }

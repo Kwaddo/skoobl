@@ -52,11 +52,16 @@ interface GameStore {
   notices: Notice[];
   self: string;
   error: string | null;
+  // Whether this client has a live socket carrying current state. False between
+  // a drop and the first broadcast after reconnect, so consumers can hold off on
+  // clock-driven actions (e.g. the drawing auto-submit) during a blackout.
+  connected: boolean;
   setSelf: (name: string) => void;
   applyState: (s: GameState) => void;
   recordDrawing: (round: number, strokes: Stroke[]) => void;
   dismissNotice: (id: number) => void;
   setError: (msg: string | null) => void;
+  setConnected: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -83,6 +88,7 @@ const initial = {
   notices: [] as Notice[],
   self: "",
   error: null as string | null,
+  connected: false,
 };
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -152,5 +158,6 @@ export const useGameStore = create<GameStore>((set) => ({
   dismissNotice: (id) =>
     set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   setError: (msg) => set({ error: msg }),
+  setConnected: (v) => set({ connected: v }),
   reset: () => set({ ...initial, notices: [] }),
 }));

@@ -33,6 +33,14 @@ const (
 	// DefaultGrace is how long a disconnected player (or a never-populated room)
 	// is kept before being pruned/reaped. Survives refreshes and brief drops.
 	DefaultGrace = 60 * time.Second
+	// resumeGrace is the minimum time a timed phase resumes with after a restart
+	// (deploy). The phase deadline is an absolute timestamp that keeps elapsing
+	// while the process is down, so a deploy overlapping the phase end would
+	// restore with ~0 left — instantly advancing the round and tripping every
+	// client's auto-submit, which flips the host TV to "everyone done" the moment
+	// the new build comes up. Flooring the resumed deadline gives the round time
+	// to visibly continue instead.
+	resumeGrace = 20 * time.Second
 	// minPlayers is the smallest room that can start a game — you need an artist
 	// plus enough guessers for "who drew this?" to be a real question.
 	minPlayers = 4
@@ -234,8 +242,13 @@ func (r *Room) onStart() {
 	if r.state.Phase == PhaseDrawing || r.state.Phase == PhaseGuessing {
 		r.phaseGen++
 		d := time.Until(time.UnixMilli(r.state.PhaseEndsAt))
-		if d < 0 {
-			d = 0
+		// A restart that ate the phase down to (or past) its end must not resume
+		// with d≈0 — that would advance immediately. Hand back a fixed window and
+		// re-stamp the deadline; the next broadcast re-syncs every client's
+		// countdown to it. See resumeGrace.
+		if d < resumeGrace {
+			d = resumeGrace
+			r.state.PhaseEndsAt = time.Now().Add(d).UnixMilli()
 		}
 		r.armAdvance(r.phaseGen, d)
 	}

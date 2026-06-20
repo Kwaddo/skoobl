@@ -40,13 +40,22 @@ export function useGameSocket(
         spectator ? { code, name, spectator: true } : { code, name },
       );
     });
-    socket.on("state", (s: GameState) => useGameStore.getState().applyState(s));
+    socket.on("state", (s: GameState) => {
+      const store = useGameStore.getState();
+      store.applyState(s);
+      // Mark connected only once a broadcast lands, not on the bare "connect"
+      // event: between reconnect and the first fresh state the store still holds
+      // the pre-drop (possibly expired) deadline, and flipping connected early
+      // would let the auto-submit fire against that stale clock.
+      store.setConnected(true);
+    });
     socket.on("error", (e: ServerError) =>
       useGameStore.getState().setError(e.message),
     );
     socket.on("connect_error", () =>
       useGameStore.getState().setError(CONNECTION_ERROR),
     );
+    socket.on("disconnect", () => useGameStore.getState().setConnected(false));
 
     return () => {
       socket.removeAllListeners();
