@@ -16,12 +16,16 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
     >
       <Sun
         className={`absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 transition-all duration-500 ease-out-soft ${
-          dark ? "rotate-0 scale-100 opacity-100" : "-rotate-90 scale-50 opacity-0"
+          dark
+            ? "rotate-0 scale-100 opacity-100"
+            : "-rotate-90 scale-50 opacity-0"
         }`}
       />
       <Moon
         className={`absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 transition-all duration-500 ease-out-soft ${
-          dark ? "rotate-90 scale-50 opacity-0" : "rotate-0 scale-100 opacity-100"
+          dark
+            ? "rotate-90 scale-50 opacity-0"
+            : "rotate-0 scale-100 opacity-100"
         }`}
       />
     </button>

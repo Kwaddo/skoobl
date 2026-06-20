@@ -77,11 +77,15 @@ function Panel({
   className?: string;
 }) {
   return (
-    <div className={`card-arcade flex min-h-0 flex-col p-4 sm:p-5 ${className}`}>
+    <div
+      className={`card-arcade flex min-h-0 flex-col p-4 sm:p-5 ${className}`}
+    >
       {(title || aside) && (
         <div className="mb-3 flex shrink-0 items-baseline justify-between gap-3">
           {title && (
-            <h2 className="font-display text-lg font-bold sm:text-xl">{title}</h2>
+            <h2 className="font-display text-lg font-bold sm:text-xl">
+              {title}
+            </h2>
           )}
           {aside}
         </div>

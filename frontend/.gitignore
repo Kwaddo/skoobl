@@ -2,23 +2,12 @@
 
 # dependencies
 /node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+
+# build output (Vite). Built fresh on deploy/CI; never committed.
+/dist
 
 # testing
 /coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
 
 # misc
 .DS_Store
@@ -30,13 +19,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env
 .env.local
 
-# vercel
-.vercel
-
-# typescript
+# vite / tanstack
+.tanstack
 *.tsbuildinfo
-next-env.d.ts

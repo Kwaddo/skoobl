@@ -151,9 +151,7 @@ export function Scoreboard({ players }: { players: Player[] }) {
               </span>
             )}
           </span>
-          {p.correct && (
-            <Check className="h-4 w-4 text-foreground" />
-          )}
+          {p.correct && <Check className="h-4 w-4 text-foreground" />}
           {p.roundScore != null && p.roundScore > 0 && (
             <span className="font-mono text-xs font-bold text-primary">
               +{p.roundScore}

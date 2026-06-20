@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,11 +50,12 @@ func main() {
 		log.Print("redis not configured; running in-memory")
 	}
 
-	io := realtime.NewServer(h)
+	origins := parseOrigins(os.Getenv("ALLOWED_ORIGINS"))
+	io := realtime.NewServer(h, origins)
 
 	srv := &http.Server{
 		Addr:    ":8080",
-		Handler: router.New(h, io),
+		Handler: router.New(h, io, origins),
 	}
 
 	go func() {
@@ -80,6 +82,19 @@ func main() {
 		}
 	}
 	log.Println("server stopped")
+}
+
+// parseOrigins splits ALLOWED_ORIGINS (comma-separated full origins) into a
+// trimmed, non-empty list. Empty in production (same-origin); set only for
+// cross-origin dev.
+func parseOrigins(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // snapshotTTL reads SNAPSHOT_TTL (Go duration), defaulting to 1h.
