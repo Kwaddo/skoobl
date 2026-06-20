@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { syncClock } from "./clock";
 import type {
   GameState,
   Language,
@@ -77,6 +78,9 @@ export const useGameStore = create<GameStore>((set) => ({
   setSelf: (name) => set({ self: name }),
   applyState: (s) =>
     set((prev) => {
+      // Re-anchor the shared clock to the server on every broadcast, so the
+      // countdown is immune to this device's clock being off (see lib/clock).
+      syncClock(s.serverNow);
       // Diff the roster against the previous broadcast: any name that vanished
       // was actually removed (left or pruned past grace) — a mere disconnect
       // keeps them in the roster marked away, so this never false-fires. Skip
