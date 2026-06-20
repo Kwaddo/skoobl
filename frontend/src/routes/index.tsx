@@ -88,7 +88,7 @@ function Home() {
 
   return (
     <main className="grain-above relative mx-auto flex min-h-dvh w-full max-w-xl flex-col justify-center gap-10 px-6 py-12">
-      <div className="absolute right-6 top-6">
+      <div className="fixed right-5 top-5 z-10">
         <ThemeToggle />
       </div>
 
