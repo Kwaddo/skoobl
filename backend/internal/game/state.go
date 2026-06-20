@@ -17,6 +17,13 @@ const (
 	PhaseEnded    Phase = "ended"
 )
 
+// inGame reports whether a round is actively underway (someone is drawing,
+// guessing, or looking at a reveal) — as opposed to the lobby or the final
+// scoreboard. Used to gate mid-game abandons and the below-minimum bounce.
+func (p Phase) inGame() bool {
+	return p == PhaseDrawing || p == PhaseGuessing || p == PhaseReveal
+}
+
 // Language selects which built-in prompt pool to use and is echoed to clients so
 // the UI can render prompts right-to-left when needed. It only ever affects the
 // category/prompt words — never the rest of the (English) game UI.
@@ -53,6 +60,7 @@ type Player struct {
 	HasDrawn   bool `json:"hasDrawn,omitempty"`   // drew something non-empty this round
 	HasGuessed bool `json:"hasGuessed,omitempty"` // submitted a guess this round
 	Correct    bool `json:"correct,omitempty"`    // reveal: guessed the artist right
+	RoundScore int  `json:"roundScore,omitempty"` // reveal: points earned this round
 }
 
 // Reveal carries the answer shown to everyone at the end of a round.
@@ -93,6 +101,8 @@ type GameState struct {
 	Featured     string              `json:"featured,omitempty"`     // artist shown this round
 	FeaturedPast []string            `json:"featuredPast,omitempty"` // artists already featured
 	Guesses      map[string]string   `json:"guesses,omitempty"`      // guesser → guessed artist
+	GuessTimes   map[string]int64    `json:"guessTimes,omitempty"`   // guesser → unix-ms of their latest guess
+	LastDeltas   map[string]int      `json:"lastDeltas,omitempty"`   // player → points earned in the round just scored
 
 	// View-only fields, populated by viewFor. Never set on the authoritative
 	// state, so they marshal away (omitempty) in the persisted snapshot.
@@ -102,6 +112,9 @@ type GameState struct {
 	YouAreArtist   bool     `json:"youAreArtist,omitempty"`
 	YourGuess      string   `json:"yourGuess,omitempty"`
 	Reveal         *Reveal  `json:"reveal,omitempty"`
+	// Closed is the final frame the room sends when the host leaves: the room is
+	// gone and clients should kick everyone back to the main menu.
+	Closed bool `json:"closed,omitempty"`
 }
 
 func newGameState(code string) GameState {
@@ -141,6 +154,7 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		GuessMs:     g.GuessMs,
 		PhaseEndsAt: g.PhaseEndsAt,
 		You:         name,
+		Closed:      g.Closed,
 	}
 
 	v.Players = make([]Player, len(g.Players))
@@ -162,6 +176,9 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 			if guess, ok := g.Guesses[p.Name]; ok && guess == g.Featured {
 				pub.Correct = true
 			}
+		}
+		if g.Phase == PhaseReveal {
+			pub.RoundScore = g.LastDeltas[p.Name]
 		}
 		v.Players[i] = pub
 	}

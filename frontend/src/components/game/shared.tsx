@@ -1,6 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
+import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { buildJoinUrl } from "@/lib/join-link";
 import type { Player } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 import { Alert, Avatar, Check, Crown, Eyes, Sparkle, Trophy } from "./icons";
@@ -11,10 +13,12 @@ export function RoomHeader({
   code,
   name,
   onLeave,
+  onBackToLobby,
 }: {
   code: string;
   name: string;
   onLeave: () => void;
+  onBackToLobby?: () => void;
 }) {
   const phase = useGameStore((s) => s.phase);
   const round = useGameStore((s) => s.round);
@@ -45,6 +49,16 @@ export function RoomHeader({
           </span>
         </span>
         <ThemeToggle />
+        {onBackToLobby && (
+          <button
+            type="button"
+            onClick={onBackToLobby}
+            className="btn-ghost px-3 py-1.5 text-sm"
+            title="End the game and return everyone to the lobby"
+          >
+            Back to lobby
+          </button>
+        )}
         <button
           type="button"
           onClick={onLeave}
@@ -58,7 +72,9 @@ export function RoomHeader({
   );
 }
 
-// CodeCard shows the room code with a copy button — for sharing from the lobby.
+// CodeCard shows the room code (with a copy button) plus a QR that drops a phone
+// straight onto the prefilled Join form — share it from the lobby for both
+// manual entry and instant scan-to-join.
 export function CodeCard({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -66,6 +82,9 @@ export function CodeCard({ code }: { code: string }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   };
+  // Absolute link the QR encodes. Same-origin, so the page's own origin is the
+  // one players reach; the code rides in the query string.
+  const joinUrl = buildJoinUrl(window.location.origin, code);
   return (
     <div className="card-arcade flex shrink-0 items-center justify-between gap-4 p-5">
       <div className="flex flex-col gap-1">
@@ -84,6 +103,21 @@ export function CodeCard({ code }: { code: string }) {
             {copied ? "copied!" : "copy"}
           </span>
         </button>
+        <span className="mt-1 font-mono text-[11px] uppercase tracking-widest text-muted">
+          scan to join →
+        </span>
+      </div>
+      {/* Fixed dark-on-light tile so the code scans reliably in either theme. */}
+      <div className="shrink-0 rounded-xl bg-white p-2">
+        <QRCodeSVG
+          value={joinUrl}
+          size={104}
+          level="M"
+          marginSize={0}
+          fgColor="#000000"
+          bgColor="#ffffff"
+          aria-label="QR code to join this room"
+        />
       </div>
     </div>
   );
@@ -119,6 +153,11 @@ export function Scoreboard({ players }: { players: Player[] }) {
           </span>
           {p.correct && (
             <Check className="h-4 w-4 text-foreground" />
+          )}
+          {p.roundScore != null && p.roundScore > 0 && (
+            <span className="font-mono text-xs font-bold text-primary">
+              +{p.roundScore}
+            </span>
           )}
           <span className="font-mono text-sm font-bold text-foreground">
             {p.score ?? 0}

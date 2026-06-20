@@ -190,12 +190,14 @@ func TestFullRoundFlowAndScoring(t *testing.T) {
 		t.Fatalf("reveal = %+v, want artist %q", rev.Reveal, artist)
 	}
 	for _, p := range rev.Players {
-		want := pointsPerCorrect
 		if p.Name == artist {
-			want = 0 // the artist doesn't guess and scores nothing this round
+			if p.Score != 0 {
+				t.Fatalf("artist %s scored %d, want 0 (everyone identified them)", p.Name, p.Score)
+			}
+			continue
 		}
-		if p.Score != want {
-			t.Fatalf("%s scored %d, want %d", p.Name, p.Score, want)
+		if p.Score < pointsMax-speedSpread || p.Score > pointsMax {
+			t.Fatalf("guesser %s scored %d, want within [%d,%d]", p.Name, p.Score, pointsMax-speedSpread, pointsMax)
 		}
 	}
 }
@@ -264,6 +266,130 @@ func TestReturnToLobbyResetsAndAllowsRestart(t *testing.T) {
 	// And the host can immediately start a fresh game.
 	r.Submit(Command{Kind: CmdStart, Player: "tv"})
 	awaitPhase(t, chans["alice"], PhaseDrawing)
+}
+
+func TestBelowMinReturnsToLobby(t *testing.T) {
+	r := NewRoom("belowmin", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 64))
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+
+	// dave leaves → only three players remain, below minPlayers, so the whole
+	// room bounces back to the lobby instead of limping along under-strength.
+	r.Submit(Command{Kind: CmdLeave, Player: "dave", Unsub: chans["dave"]})
+
+	s := awaitPhase(t, chans["alice"], PhaseLobby)
+	if len(s.Players) != 3 {
+		t.Fatalf("players = %d, want 3 after one left", len(s.Players))
+	}
+	if s.Round != 0 {
+		t.Fatalf("round = %d, want 0 back in the lobby", s.Round)
+	}
+	for _, p := range s.Players {
+		if p.Score != 0 {
+			t.Fatalf("%s score = %d, want 0 after the bounce", p.Name, p.Score)
+		}
+	}
+}
+
+func TestBriefDisconnectDoesNotBounce(t *testing.T) {
+	r := NewRoom("nobounce", WithGrace(time.Hour)) // long grace: no prune mid-test
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 64))
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+
+	// dave's socket drops (a refresh) but he stays in the roster during grace, so
+	// the game must keep running — a transient blip is not a real departure.
+	r.Submit(Command{Kind: CmdDisconnect, Player: "dave", Unsub: chans["dave"]})
+
+	s := poke(t, r, chans["alice"])
+	if s.Phase != PhaseDrawing {
+		t.Fatalf("phase = %q, want drawing (a brief disconnect must not bounce)", s.Phase)
+	}
+	if len(s.Players) != 4 {
+		t.Fatalf("players = %d, want 4 (dave still in the roster during grace)", len(s.Players))
+	}
+}
+
+func TestHostLeaveClosesRoomForPlayers(t *testing.T) {
+	r := NewRoom("hostclose", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	hostSub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", hostSub)
+	playerSub := make(chan GameState, 16)
+	joinOK(t, r, "alice", playerSub)
+	drain(playerSub)
+
+	// The host leaving closes the whole room; the remaining player must get a
+	// final frame flagged Closed so the client can kick them to the main menu.
+	r.Submit(Command{Kind: CmdLeave, Player: "tv", Unsub: hostSub})
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case s := <-playerSub:
+			if s.Closed {
+				return
+			}
+		case <-deadline:
+			t.Fatal("player never received a Closed frame after the host left")
+		}
+	}
+}
+
+func TestHostReturnsToLobbyMidGame(t *testing.T) {
+	r := NewRoom("midlobby", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 64))
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+
+	// A non-host cannot abandon a running game.
+	r.Submit(Command{Kind: CmdReturnToLobby, Player: "alice"})
+	if s := poke(t, r, chans["bob"]); s.Phase != PhaseDrawing {
+		t.Fatalf("non-host returned a running game to the lobby: phase=%q", s.Phase)
+	}
+
+	// The host can return everyone to the lobby before the game ends.
+	r.Submit(Command{Kind: CmdReturnToLobby, Player: "tv"})
+	s := awaitPhase(t, chans["alice"], PhaseLobby)
+	if s.Round != 0 || len(s.Players) != 4 {
+		t.Fatalf("after a mid-game return: round=%d players=%d, want 0 and 4", s.Round, len(s.Players))
+	}
 }
 
 func TestConfigureAppliesAndClamps(t *testing.T) {
@@ -688,5 +814,210 @@ func TestDisconnectStopsBroadcasts(t *testing.T) {
 	case x := <-gone:
 		t.Fatalf("unsubscribed channel still received: %+v", x)
 	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestSpeedScoreCurve(t *testing.T) {
+	// Window is [90_000, 100_000] (GuessMs before PhaseEndsAt).
+	r := &Room{state: GameState{GuessMs: 10_000, PhaseEndsAt: 100_000}}
+	cases := []struct {
+		name      string
+		guessedAt int64
+		want      int
+	}{
+		{"instant", 90_000, pointsMax},
+		{"midpoint", 95_000, pointsMax - speedSpread/2},
+		{"buzzer", 100_000, pointsMax - speedSpread},
+		{"before window clamps to max", 80_000, pointsMax},
+		{"after window clamps to floor", 120_000, pointsMax - speedSpread},
+	}
+	for _, c := range cases {
+		if got := r.speedScore(c.guessedAt); got != c.want {
+			t.Fatalf("%s: speedScore(%d) = %d, want %d", c.name, c.guessedAt, got, c.want)
+		}
+	}
+}
+
+func TestArtistPot(t *testing.T) {
+	cases := []struct{ correct, eligible, want int }{
+		{0, 3, 100}, // nobody identifies → full pot
+		{3, 3, 0},   // everyone identifies → nothing
+		{1, 3, 67},  // one of three ≈ two-thirds
+		{2, 4, 50},  // half
+		{0, 0, 100}, // edge: no eligible guessers at all
+	}
+	for _, c := range cases {
+		if got := artistPot(c.correct, c.eligible); got != c.want {
+			t.Fatalf("artistPot(%d, %d) = %d, want %d", c.correct, c.eligible, got, c.want)
+		}
+	}
+}
+
+func TestArtistPotWhenNoneIdentify(t *testing.T) {
+	r := NewRoom("pot0", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 64))
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+	for _, n := range names {
+		r.Submit(Command{Kind: CmdSubmitDrawing, Player: n, Strokes: []Stroke{
+			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+		}})
+	}
+
+	artist := ""
+	for _, n := range names {
+		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
+			artist = n
+		}
+	}
+	if artist == "" {
+		t.Fatal("no featured artist surfaced")
+	}
+
+	// Every guesser names a wrong player (anyone who is not the artist), so nobody
+	// identifies the artist. allGuessed then advances to reveal.
+	wrong := ""
+	for _, n := range names {
+		if n != artist {
+			wrong = n
+			break
+		}
+	}
+	for _, n := range names {
+		if n != artist {
+			r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: wrong})
+		}
+	}
+
+	rev := awaitPhase(t, chans["alice"], PhaseReveal)
+	for _, p := range rev.Players {
+		want := 0
+		if p.Name == artist {
+			want = pointsMax // nobody identified them → full pot
+		}
+		if p.Score != want {
+			t.Fatalf("%s scored %d, want %d", p.Name, p.Score, want)
+		}
+	}
+}
+
+func TestRevealViewCarriesRoundScore(t *testing.T) {
+	r := NewRoom("delta1", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	joinSpec(t, r, "tv", make(chan GameState, 64))
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+	for _, n := range names {
+		r.Submit(Command{Kind: CmdSubmitDrawing, Player: n, Strokes: []Stroke{
+			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+		}})
+	}
+	artist := ""
+	for _, n := range names {
+		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
+			artist = n
+		}
+	}
+	for _, n := range names {
+		if n != artist {
+			r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: artist})
+		}
+	}
+
+	rev := awaitPhase(t, chans["alice"], PhaseReveal)
+	for _, p := range rev.Players {
+		if p.Name == artist {
+			continue // pot is 0 here; omitempty drops it, which is fine
+		}
+		if p.RoundScore == 0 {
+			t.Fatalf("guesser %s has RoundScore 0 in the reveal view, want their earned points", p.Name)
+		}
+		if p.RoundScore != p.Score {
+			t.Fatalf("%s RoundScore %d != Score %d (single round, should match)", p.Name, p.RoundScore, p.Score)
+		}
+	}
+}
+
+func TestCorrectGuessCountsAfterDisconnect(t *testing.T) {
+	r := NewRoom("dcpot", WithGrace(time.Hour)) // long grace: guesser isn't pruned
+	go r.Run()
+	defer r.Stop()
+
+	hostCh := make(chan GameState, 64)
+	joinSpec(t, r, "tv", hostCh)
+	names := []string{"alice", "bob", "carol", "dave"}
+	chans := map[string]chan GameState{}
+	for _, n := range names {
+		ch := make(chan GameState, 64)
+		chans[n] = ch
+		joinOK(t, r, n, ch)
+	}
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, chans["alice"], PhaseDrawing)
+	for _, n := range names {
+		r.Submit(Command{Kind: CmdSubmitDrawing, Player: n, Strokes: []Stroke{
+			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+		}})
+	}
+	artist := ""
+	for _, n := range names {
+		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
+			artist = n
+		}
+	}
+
+	// Pick a correct guesser who is not the artist; they guess right, then drop.
+	first := ""
+	for _, n := range names {
+		if n != artist {
+			first = n
+			break
+		}
+	}
+	r.Submit(Command{Kind: CmdSubmitGuess, Player: first, Guess: artist})
+	r.Submit(Command{Kind: CmdDisconnect, Player: first, Unsub: chans[first]})
+
+	// The remaining two connected guessers name a wrong player, advancing to reveal.
+	for _, n := range names {
+		if n == artist || n == first {
+			continue
+		}
+		r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: n}) // self ≠ artist → wrong
+	}
+
+	rev := awaitPhase(t, hostCh, PhaseReveal)
+	// eligible = 2 connected guessers + the disconnected-but-correct one = 3; 1 correct.
+	wantPot := artistPot(1, 3) // 67
+	scores := map[string]int{}
+	for _, p := range rev.Players {
+		scores[p.Name] = p.Score
+	}
+	if scores[artist] != wantPot {
+		t.Fatalf("artist pot = %d, want %d (correct guess must survive the disconnect)", scores[artist], wantPot)
+	}
+	if scores[first] < pointsMax-speedSpread || scores[first] > pointsMax {
+		t.Fatalf("disconnected correct guesser scored %d, want within [%d,%d]", scores[first], pointsMax-speedSpread, pointsMax)
 	}
 }
