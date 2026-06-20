@@ -8,13 +8,13 @@ describe("DrawingCanvas tools", () => {
     const { getByLabelText, queryByLabelText } = render(<DrawingCanvas />);
     expect(getByLabelText(/pen tool/i)).toBeTruthy();
     expect(getByLabelText(/fill tool/i)).toBeTruthy();
-    // The popover is closed initially — presets and the custom input are hidden.
+    // The popover is closed initially — presets and the hex input are hidden.
     expect(queryByLabelText(`color ${PALETTE[0]}`)).toBeNull();
-    expect(queryByLabelText(/custom color/i)).toBeNull();
+    expect(queryByLabelText(/hex color/i)).toBeNull();
     // Opening it reveals the preset swatches and the custom picker.
     fireEvent.click(getByLabelText(/pick color/i));
     expect(getByLabelText(`color ${PALETTE[0]}`)).toBeTruthy();
-    expect(getByLabelText(/custom color/i)).toBeTruthy();
+    expect(getByLabelText(/hex color/i)).toBeTruthy();
   });
 
   it("opens a stroke-size slider from the pen, and the fill tool closes it", () => {

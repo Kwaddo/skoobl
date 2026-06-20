@@ -353,6 +353,30 @@ canvas {
   }
 }
 
+/* ── color picker (react-colorful) ──────────────────────────────────────────
+   Sized to fit the toolbar popover and themed with our tokens. Higher
+   specificity (.cc-picker .react-colorful__…) overrides the library's own
+   single-class defaults regardless of stylesheet order. */
+.cc-picker .react-colorful {
+  width: 100%;
+  height: auto;
+  gap: 0.5rem;
+}
+.cc-picker .react-colorful__saturation {
+  height: 110px;
+  border-radius: 0.5rem;
+  border-bottom: none;
+}
+.cc-picker .react-colorful__hue {
+  height: 14px;
+  border-radius: 999px;
+}
+.cc-picker .react-colorful__pointer {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
 /* ── animations ─────────────────────────────────────────────────────────── */
 
 @keyframes grid-drift {
