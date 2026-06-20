@@ -1,0 +1,11 @@
+# Keep the build context small and reproducible.
+.git
+**/node_modules
+**/dist
+**/.DS_Store
+*.log
+docs
+infra
+backend/*_test.go
+frontend/.env
+frontend/.env.local

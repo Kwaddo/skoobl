@@ -23,7 +23,7 @@ func main() {
 	// Container healthcheck: exec the same binary with -healthcheck. Works in a
 	// distroless image with no shell or curl.
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
-		resp, err := http.Get("http://127.0.0.1:8080/healthz")
+		resp, err := http.Get("http://127.0.0.1:" + listenPort() + "/healthz")
 		if err != nil || resp.StatusCode != http.StatusOK {
 			os.Exit(1)
 		}
@@ -54,8 +54,8 @@ func main() {
 	io := realtime.NewServer(h, origins)
 
 	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: router.New(h, io, origins),
+		Addr:    ":" + listenPort(),
+		Handler: router.New(h, io, origins, os.Getenv("STATIC_DIR")),
 	}
 
 	go func() {
@@ -82,6 +82,15 @@ func main() {
 		}
 	}
 	log.Println("server stopped")
+}
+
+// listenPort returns the port to bind, from PORT (default 8080). On Dilmune the
+// site's reverse proxy forwards to 127.0.0.1:5533, so PORT=5533 there.
+func listenPort() string {
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8080"
 }
 
 // parseOrigins splits ALLOWED_ORIGINS (comma-separated full origins) into a

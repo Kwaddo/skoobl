@@ -3,6 +3,8 @@ package router
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -18,7 +20,7 @@ import (
 // (Vite proxy) and prod (nginx), so allowedOrigins is normally empty and no
 // CORS headers are emitted. Set it only for cross-origin dev; Socket.IO CORS is
 // configured separately on the server (see realtime.NewServer).
-func New(h *hub.Hub, io *socket.Server, allowedOrigins []string) http.Handler {
+func New(h *hub.Hub, io *socket.Server, allowedOrigins []string, staticDir string) http.Handler {
 	api := httpapi.New(h)
 
 	r := chi.NewRouter()
@@ -37,7 +39,30 @@ func New(h *hub.Hub, io *socket.Server, allowedOrigins []string) http.Handler {
 	r.Get("/healthz", api.Healthz)
 	r.Post("/games", api.CreateGame)
 	r.Handle("/socket.io/*", io.ServeHandler(nil))
+
+	// When STATIC_DIR is set, serve the built SPA same-origin: real files are
+	// served directly, unknown paths fall back to index.html for client-side
+	// routing (/host/:code, /play/:code). Used in prod (Dilmune) where one
+	// process serves both the SPA and the API; empty in dev (Vite serves the SPA).
+	if staticDir != "" {
+		r.Handle("/*", spaHandler(staticDir))
+	}
 	return r
+}
+
+// spaHandler serves files under dir, falling back to index.html for paths that
+// don't map to a real file so the client-side router can handle them.
+func spaHandler(dir string) http.HandlerFunc {
+	fs := http.FileServer(http.Dir(dir))
+	index := filepath.Join(dir, "index.html")
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := filepath.Join(dir, filepath.Clean(r.URL.Path))
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			fs.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, index)
+	}
 }
 
 // corsMiddleware reflects the request Origin when it is in the allowlist and

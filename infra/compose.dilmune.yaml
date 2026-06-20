@@ -1,0 +1,45 @@
+name: skoobl
+
+# Deployment for Dilmune Cloud (reverse-proxy site): Dilmune terminates HTTPS
+# and proxies to 127.0.0.1:5533 on the host. One container serves the SPA + API
+# + Socket.IO on that port, so the app is same-origin (no CORS). Redis is an
+# internal sibling, never published.
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      PORT: 5533
+      STATIC_DIR: /www
+      REDIS_ADDR: redis:6379
+      SNAPSHOT_TTL: ${SNAPSHOT_TTL:-1h}
+      # Same-origin behind Dilmune; leave empty so no CORS headers are emitted.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    ports:
+      - "127.0.0.1:5533:5533" # loopback only; Dilmune proxies to this
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/server", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
