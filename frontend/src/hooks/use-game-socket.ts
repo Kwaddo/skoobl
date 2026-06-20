@@ -72,6 +72,10 @@ export function useGameSocket(
       (strokes: Stroke[]) => emit("submitDrawing", { strokes }),
       [emit],
     ),
+    draftDrawing: useCallback(
+      (strokes: Stroke[]) => emit("draftDrawing", { strokes }),
+      [emit],
+    ),
     submitGuess: useCallback(
       (artist: string) => emit("submitGuess", { artist }),
       [emit],

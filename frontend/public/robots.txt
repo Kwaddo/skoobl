@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://skoobl-afqe-alimohsen999.dilmune.app/sitemap.xml

@@ -37,6 +37,14 @@ interface GameStore {
   phaseEndsAt: number;
   yourPrompt: string;
   currentDrawing: Stroke[];
+  gallery: Record<string, Stroke[]>;
+  // The player's own drawings this game, keyed by round (for the game-end
+  // gallery + download). Accumulated client-side; cleared back in the lobby.
+  myDrawings: Record<number, Stroke[]>;
+  // The host accumulates every reveal's gallery (all players' drawings, keyed by
+  // round → artist) so the final results can carousel through the whole game.
+  // Only the host receives `gallery`, so this stays empty on player clients.
+  galleryHistory: Record<number, Record<string, Stroke[]>>;
   youAreArtist: boolean;
   yourGuess: string;
   reveal: Reveal | null;
@@ -46,6 +54,7 @@ interface GameStore {
   error: string | null;
   setSelf: (name: string) => void;
   applyState: (s: GameState) => void;
+  recordDrawing: (round: number, strokes: Stroke[]) => void;
   dismissNotice: (id: number) => void;
   setError: (msg: string | null) => void;
   reset: () => void;
@@ -64,6 +73,9 @@ const initial = {
   phaseEndsAt: 0,
   yourPrompt: "",
   currentDrawing: [] as Stroke[],
+  gallery: {} as Record<string, Stroke[]>,
+  myDrawings: {} as Record<number, Stroke[]>,
+  galleryHistory: {} as Record<number, Record<string, Stroke[]>>,
   youAreArtist: false,
   yourGuess: "",
   reveal: null as Reveal | null,
@@ -76,6 +88,8 @@ const initial = {
 export const useGameStore = create<GameStore>((set) => ({
   ...initial,
   setSelf: (name) => set({ self: name }),
+  recordDrawing: (round, strokes) =>
+    set((s) => ({ myDrawings: { ...s.myDrawings, [round]: strokes } })),
   applyState: (s) =>
     set((prev) => {
       // Re-anchor the shared clock to the server on every broadcast, so the
@@ -117,6 +131,17 @@ export const useGameStore = create<GameStore>((set) => ({
         phaseEndsAt: s.phaseEndsAt ?? 0,
         yourPrompt: s.yourPrompt ?? "",
         currentDrawing: s.currentDrawing ?? [],
+        gallery: s.gallery ?? {},
+        // Wipe the player's own gallery when a new game starts (back in lobby).
+        myDrawings: s.phase === "lobby" ? {} : prev.myDrawings,
+        // Host-only: fold each reveal's gallery into the per-round history;
+        // wiped back in the lobby like the rest of a game's drawing data.
+        galleryHistory:
+          s.phase === "lobby"
+            ? {}
+            : s.gallery && Object.keys(s.gallery).length > 0 && s.round
+              ? { ...prev.galleryHistory, [s.round]: s.gallery }
+              : prev.galleryHistory,
         youAreArtist: s.youAreArtist ?? false,
         yourGuess: s.yourGuess ?? "",
         reveal: s.reveal ?? null,

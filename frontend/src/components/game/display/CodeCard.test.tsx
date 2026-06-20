@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { CodeCard } from "./shared";
+import { CodeCard } from "./CodeCard";
 
 describe("CodeCard", () => {
   it("renders a join QR and a scan hint alongside the code", () => {

@@ -46,6 +46,9 @@ type Stroke struct {
 	Color  string  `json:"color"`
 	Width  float64 `json:"width"`
 	Points []Point `json:"points"`
+	// Fill marks a flood-fill op: Points[0] is the seed, Color is the fill
+	// color, Width is ignored. Replayed deterministically at render time.
+	Fill bool `json:"fill,omitempty"`
 }
 
 // Player is one participant. Name and Score are authoritative; the remaining
@@ -61,6 +64,7 @@ type Player struct {
 	HasGuessed bool `json:"hasGuessed,omitempty"` // submitted a guess this round
 	Correct    bool `json:"correct,omitempty"`    // reveal: guessed the artist right
 	RoundScore int  `json:"roundScore,omitempty"` // reveal: points earned this round
+	Locked     bool `json:"locked,omitempty"`     // drawing: locked in (TV "finished ✓")
 }
 
 // Reveal carries the answer shown to everyone at the end of a round.
@@ -87,7 +91,7 @@ type GameState struct {
 	Phase       Phase    `json:"phase"`
 	Host        string   `json:"host"`
 	Players     []Player `json:"players"`
-	Round       int      `json:"round"`       // 1-based; 0 in the lobby
+	Round       int      `json:"round"` // 1-based; 0 in the lobby
 	TotalRounds int      `json:"totalRounds"`
 	Language    Language `json:"language"`
 	DrawMs      int      `json:"drawMs"`
@@ -97,7 +101,8 @@ type GameState struct {
 	// Authoritative round data — persisted (server-side) but redacted from views.
 	Categories   []string            `json:"categories,omitempty"`   // active prompt pool
 	Prompt       string              `json:"prompt,omitempty"`       // the universal word everyone draws this round
-	Drawings     map[string][]Stroke `json:"drawings,omitempty"`     // player → strokes this round
+	Drawings     map[string][]Stroke `json:"drawings,omitempty"`     // player → latest strokes this round (draft or locked)
+	Locked       map[string]bool     `json:"locked,omitempty"`       // player → locked in (gates early-advance)
 	Featured     string              `json:"featured,omitempty"`     // artist shown this round
 	FeaturedPast []string            `json:"featuredPast,omitempty"` // artists already featured
 	Guesses      map[string]string   `json:"guesses,omitempty"`      // guesser → guessed artist
@@ -106,12 +111,13 @@ type GameState struct {
 
 	// View-only fields, populated by viewFor. Never set on the authoritative
 	// state, so they marshal away (omitempty) in the persisted snapshot.
-	You            string   `json:"you,omitempty"`
-	YourPrompt     string   `json:"yourPrompt,omitempty"`
-	CurrentDrawing []Stroke `json:"currentDrawing,omitempty"`
-	YouAreArtist   bool     `json:"youAreArtist,omitempty"`
-	YourGuess      string   `json:"yourGuess,omitempty"`
-	Reveal         *Reveal  `json:"reveal,omitempty"`
+	You            string              `json:"you,omitempty"`
+	YourPrompt     string              `json:"yourPrompt,omitempty"`
+	CurrentDrawing []Stroke            `json:"currentDrawing,omitempty"`
+	Gallery        map[string][]Stroke `json:"gallery,omitempty"` // reveal, host only: every player's drawing
+	YouAreArtist   bool                `json:"youAreArtist,omitempty"`
+	YourGuess      string              `json:"yourGuess,omitempty"`
+	Reveal         *Reveal             `json:"reveal,omitempty"`
 	// Closed is the final frame the room sends when the host leaves: the room is
 	// gone and clients should kick everyone back to the main menu.
 	Closed bool `json:"closed,omitempty"`
@@ -169,6 +175,9 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		if len(g.Drawings[p.Name]) > 0 {
 			pub.HasDrawn = true
 		}
+		if g.Locked[p.Name] {
+			pub.Locked = true
+		}
 		if _, ok := g.Guesses[p.Name]; ok {
 			pub.HasGuessed = true
 		}
@@ -194,6 +203,12 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		v.CurrentDrawing = g.Drawings[g.Featured]
 		v.YourGuess = g.Guesses[name]
 		v.Reveal = &Reveal{Artist: g.Featured, Prompt: g.Prompt}
+		if name == g.Host {
+			v.Gallery = make(map[string][]Stroke, len(g.Drawings))
+			for artist, strokes := range g.Drawings {
+				v.Gallery[artist] = append([]Stroke(nil), strokes...)
+			}
+		}
 	}
 	return v
 }

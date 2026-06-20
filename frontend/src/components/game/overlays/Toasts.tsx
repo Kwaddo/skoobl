@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { Notice } from "@/lib/store";
 import { useGameStore } from "@/lib/store";
-import { Cross } from "./icons";
+import { Cross } from "../icons";
 
 // Toasts renders the store's transient notices (a player left, bounced back to
 // the lobby, …) as a stack of auto-dismissing cards. Mounted once by GameStage
