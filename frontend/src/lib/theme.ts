@@ -47,9 +47,7 @@ function commit(next: Theme) {
 export function toggleTheme(origin?: { x: number; y: number }) {
   const next: Theme = current === "dark" ? "light" : "dark";
   const root = document.documentElement;
-  const reduce = window.matchMedia(
-    "(prefers-reduced-motion: reduce)",
-  ).matches;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const start = document.startViewTransition?.bind(document);
 

@@ -11,7 +11,7 @@ import (
 
 func newRouter() http.Handler {
 	h := hub.New()
-	return New(h, realtime.NewServer(h))
+	return New(h, realtime.NewServer(h, nil), nil)
 }
 
 func TestHealthzOK(t *testing.T) {
@@ -43,5 +43,51 @@ func TestSocketIOMounted(t *testing.T) {
 	newRouter().ServeHTTP(rec, req)
 	if rec.Code == http.StatusNotFound {
 		t.Fatalf("/socket.io/ not mounted: got 404")
+	}
+}
+
+func corsRouter() http.Handler {
+	h := hub.New()
+	origins := []string{"http://localhost:5173"}
+	return New(h, realtime.NewServer(h, origins), origins)
+}
+
+func TestCORSReflectsAllowedOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/games", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+	corsRouter().ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want the request origin", got)
+	}
+}
+
+func TestCORSPreflightShortCircuits(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/games", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+	corsRouter().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want 204", rec.Code)
+	}
+}
+
+func TestCORSRejectsUnknownOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/games", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	rec := httptest.NewRecorder()
+	corsRouter().ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty for non-allowlisted origin", got)
+	}
+}
+
+func TestNoCORSHeadersWhenSameOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/games", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+	newRouter().ServeHTTP(rec, req) // nil allowlist
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty when no allowlist configured", got)
 	}
 }

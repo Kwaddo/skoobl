@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zishang520/socket.io/servers/socket/v3"
+	"github.com/zishang520/socket.io/v3/pkg/types"
 
 	"skoobl/internal/game"
 	"skoobl/internal/hub"
@@ -19,8 +20,25 @@ import (
 // NewServer builds a Socket.IO server wired to the hub. Mount its handler at
 // /socket.io/ (see router). It speaks the modern Socket.IO v4 protocol, so the
 // browser uses the standard socket.io-client.
-func NewServer(h *hub.Hub) *socket.Server {
-	io := socket.NewServer(nil, nil)
+//
+// allowedOrigins is the cross-origin allowlist for the WebSocket/polling
+// handshake. Leave it empty in production: the SPA is served same-origin behind
+// nginx, so no CORS is needed. Set it only for cross-origin dev (e.g. Vite on
+// :5173 hitting the backend directly).
+func NewServer(h *hub.Hub, allowedOrigins []string) *socket.Server {
+	// Pass a literal nil when there are no origins: a typed-nil *ServerOptions
+	// becomes a non-nil interface and the library dereferences it on Construct.
+	var io *socket.Server
+	if len(allowedOrigins) > 0 {
+		opts := socket.DefaultServerOptions()
+		opts.SetCors(&types.Cors{
+			Origin:      allowedOrigins,
+			Credentials: true,
+		})
+		io = socket.NewServer(nil, opts)
+	} else {
+		io = socket.NewServer(nil, nil)
+	}
 	io.On("connection", func(clients ...any) {
 		bind(h, clients[0].(*socket.Socket))
 	})

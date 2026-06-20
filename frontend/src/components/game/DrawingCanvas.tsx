@@ -1,5 +1,17 @@
-import { type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
-import { BRUSHES, CANVAS_H, CANVAS_W, drawStrokes, PALETTE } from "@/lib/canvas";
+import {
+  type PointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  BRUSHES,
+  CANVAS_H,
+  CANVAS_W,
+  drawStrokes,
+  PALETTE,
+} from "@/lib/canvas";
 import type { Point, Stroke } from "@/lib/protocol";
 
 // DrawingCanvas is the interactive drawing surface plus its toolbar (color

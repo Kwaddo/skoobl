@@ -7,6 +7,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/redis/go-redis/v9 v9.20.0
 	github.com/zishang520/socket.io/servers/socket/v3 v3.0.3
+	github.com/zishang520/socket.io/v3 v3.0.3
 )
 
 require (
@@ -26,7 +27,6 @@ require (
 	github.com/zishang520/socket.io/parsers/engine/v3 v3.0.3 // indirect
 	github.com/zishang520/socket.io/parsers/socket/v3 v3.0.3 // indirect
 	github.com/zishang520/socket.io/servers/engine/v3 v3.0.3 // indirect
-	github.com/zishang520/socket.io/v3 v3.0.3 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
