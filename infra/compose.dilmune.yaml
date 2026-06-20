@@ -6,6 +6,10 @@ name: skoobl
 # internal sibling, never published.
 services:
   app:
+    # CI builds this image on a GitHub runner and pushes it to GHCR; the box
+    # `docker compose pull`s it (no on-box build — too heavy for 1 GB). `build:`
+    # stays so `up --build` still works for local/manual deploys.
+    image: ghcr.io/kwaddo/skoobl:latest
     build:
       context: ..
       dockerfile: Dockerfile
