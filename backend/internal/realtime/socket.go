@@ -67,6 +67,7 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 	sock.On("nextPhase", func(...any) { c.submit(game.Command{Kind: game.CmdNextPhase}) })
 	sock.On("returnToLobby", func(...any) { c.submit(game.Command{Kind: game.CmdReturnToLobby}) })
 	sock.On("submitDrawing", func(args ...any) { c.submitDrawing(args) })
+	sock.On("draftDrawing", func(args ...any) { c.draftDrawing(args) })
 	sock.On("submitGuess", func(args ...any) {
 		c.submit(game.Command{Kind: game.CmdSubmitGuess, Guess: strings.TrimSpace(stringField(args, "artist"))})
 	})
@@ -163,6 +164,18 @@ func (c *conn) submitDrawing(args []any) {
 		return
 	}
 	c.submit(game.Command{Kind: game.CmdSubmitDrawing, Strokes: payload.Strokes})
+}
+
+// draftDrawing forwards a player's in-progress strokes during the drawing phase.
+// Same shape as submitDrawing, but does not lock the drawing in.
+func (c *conn) draftDrawing(args []any) {
+	var payload struct {
+		Strokes []game.Stroke `json:"strokes"`
+	}
+	if !decodeArg(args, &payload) {
+		return
+	}
+	c.submit(game.Command{Kind: game.CmdDraftDrawing, Strokes: payload.Strokes})
 }
 
 // onDisconnect tears down the room subscription when the socket drops. A single

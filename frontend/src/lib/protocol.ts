@@ -23,6 +23,8 @@ export interface Stroke {
   color: string;
   width: number;
   points: Point[];
+  // A flood-fill op: points[0] is the seed, color is the fill color.
+  fill?: boolean;
 }
 
 export interface Player {
@@ -33,6 +35,7 @@ export interface Player {
   hasGuessed?: boolean;
   correct?: boolean;
   roundScore?: number;
+  locked?: boolean;
 }
 
 export interface Reveal {
@@ -58,6 +61,8 @@ export interface GameState {
   you?: string;
   yourPrompt?: string;
   currentDrawing?: Stroke[];
+  // Reveal phase, host only: every player's drawing keyed by name.
+  gallery?: Record<string, Stroke[]>;
   youAreArtist?: boolean;
   yourGuess?: string;
   reveal?: Reveal | null;

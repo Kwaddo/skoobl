@@ -4,11 +4,12 @@ import { CONNECTION_ERROR, useGameSocket } from "@/hooks/use-game-socket";
 import { setFlash } from "@/lib/flash";
 import { recallName } from "@/lib/identity";
 import { useGameStore } from "@/lib/store";
-import { ConfirmDialog } from "./ConfirmDialog";
-import { HostStage } from "./HostStage";
-import { PlayerStage } from "./PlayerStage";
-import { ErrorPanel, RoomHeader } from "./shared";
-import { Toasts } from "./Toasts";
+import { ErrorPanel } from "./display/ErrorPanel";
+import { RoomHeader } from "./display/RoomHeader";
+import { ConfirmDialog } from "./overlays/ConfirmDialog";
+import { Toasts } from "./overlays/Toasts";
+import { HostStage } from "./stages/HostStage";
+import { PlayerStage } from "./stages/PlayerStage";
 
 export type Screen = "host" | "player";
 

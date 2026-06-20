@@ -181,6 +181,37 @@ export const Brush = ({ className }: IconProps) => (
   </Svg>
 );
 
+// Bucket — the fill tool: an upright paint bucket with a falling drop.
+export const Bucket = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <ellipse cx="12" cy="8.5" rx="6.5" ry="2.2" />
+    <path d="M5.5 8.5 7 19a1.8 1.8 0 0 0 1.8 1.6h6.4A1.8 1.8 0 0 0 17 19l1.5-10.5" />
+    <path d="M9 7V6.1a3 3 0 0 1 6 0V7.5" />
+    <path
+      d="M20.5 12c.85 1.15 1.3 1.95 1.3 2.55a1.25 1.25 0 0 1-2.5 0c0-.6.45-1.4 1.3-2.55z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </Svg>
+);
+
+// Undo — a curved arrow looping back.
+export const Undo = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M8 8h7a4.5 4.5 0 0 1 0 9h-4" />
+    <path d="M8 8 5 5M8 8 5 11" />
+  </Svg>
+);
+
+// Trash — clear the canvas.
+export const Trash = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M5 7h14M10 7V5.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V7" />
+    <path d="M6.6 7l.8 11a2 2 0 0 0 2 1.9h5.2a2 2 0 0 0 2-1.9l.8-11" />
+    <path d="M10.5 11v5.5M13.5 11v5.5" />
+  </Svg>
+);
+
 export const Check = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M5 12.5 10 17.5 19 7" />

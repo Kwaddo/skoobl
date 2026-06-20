@@ -61,6 +61,11 @@ describe("useGameSocket", () => {
         { color: "#fff", width: 4, points: [{ x: 1, y: 2 }] },
       ]),
     );
+    act(() =>
+      result.current.draftDrawing([
+        { color: "#0f0", width: 4, points: [{ x: 3, y: 4 }] },
+      ]),
+    );
     expect(MockSocket.last.emitted).toContainEqual({ event: "start" });
     expect(MockSocket.last.emitted).toContainEqual({ event: "returnToLobby" });
     expect(MockSocket.last.emitted).toContainEqual({
@@ -71,6 +76,12 @@ describe("useGameSocket", () => {
       event: "submitDrawing",
       payload: {
         strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 2 }] }],
+      },
+    });
+    expect(MockSocket.last.emitted).toContainEqual({
+      event: "draftDrawing",
+      payload: {
+        strokes: [{ color: "#0f0", width: 4, points: [{ x: 3, y: 4 }] }],
       },
     });
   });

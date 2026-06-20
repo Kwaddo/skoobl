@@ -1021,3 +1021,208 @@ func TestCorrectGuessCountsAfterDisconnect(t *testing.T) {
 		t.Fatalf("disconnected correct guesser scored %d, want within [%d,%d]", scores[first], pointsMax-speedSpread, pointsMax)
 	}
 }
+
+func TestSanitizePreservesFill(t *testing.T) {
+	in := []Stroke{{Color: "#ff0000", Width: 4, Points: []Point{{X: 5, Y: 5}}, Fill: true}}
+	out := sanitizeStrokes(in)
+	if len(out) != 1 {
+		t.Fatalf("got %d strokes, want 1", len(out))
+	}
+	if !out[0].Fill {
+		t.Fatal("fill flag dropped by sanitizeStrokes")
+	}
+	if out[0].Color != "#ff0000" {
+		t.Fatalf("color = %q, want #ff0000", out[0].Color)
+	}
+}
+
+func TestSanitizeRejectsBadFillColor(t *testing.T) {
+	in := []Stroke{{Color: "javascript:alert(1)", Width: 4, Points: []Point{{X: 5, Y: 5}}, Fill: true}}
+	out := sanitizeStrokes(in)
+	if len(out) != 1 || out[0].Color != defaultStrokeColor {
+		t.Fatalf("color = %q, want sanitized default", out[0].Color)
+	}
+	if !out[0].Fill {
+		t.Fatal("fill flag dropped while sanitizing a bad color")
+	}
+}
+
+// syncRoom builds a room and joins a host + the given players by calling handle
+// directly (no Run goroutine), then starts the game. Returns the room in the
+// drawing phase.
+func syncRoom(t *testing.T, players ...string) *Room {
+	t.Helper()
+	r := NewRoom("sync1")
+	r.handle(Command{Kind: CmdJoin, Player: "tv", Spectator: true,
+		Subscribe: make(chan GameState, 64), Ack: make(chan string, 1)})
+	for _, n := range players {
+		r.handle(Command{Kind: CmdJoin, Player: n,
+			Subscribe: make(chan GameState, 64), Ack: make(chan string, 1)})
+	}
+	r.handle(Command{Kind: CmdStart, Player: "tv"})
+	if r.state.Phase != PhaseDrawing {
+		t.Fatalf("phase = %q, want drawing after start", r.state.Phase)
+	}
+	return r
+}
+
+func draft(r *Room, name string) {
+	r.handle(Command{Kind: CmdDraftDrawing, Player: name, Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
+	}})
+}
+
+func TestDraftStoresWithoutAdvancing(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		draft(r, n)
+	}
+	if r.state.Phase != PhaseDrawing {
+		t.Fatalf("phase = %q, want drawing (drafts must not early-advance)", r.state.Phase)
+	}
+	if len(r.state.Drawings["alice"]) == 0 {
+		t.Fatal("alice's draft was not stored server-side")
+	}
+	if r.state.Locked["alice"] {
+		t.Fatal("a draft must not set the lock")
+	}
+}
+
+func TestAllLockedAdvancesToGuessing(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		r.handle(Command{Kind: CmdSubmitDrawing, Player: n, Strokes: []Stroke{
+			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
+		}})
+	}
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing once everyone locked", r.state.Phase)
+	}
+}
+
+func TestTimerExpiryKeepsUnlockedDrafts(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	// Only drafts — nobody locks in. Then the drawing timer fires.
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		draft(r, n)
+	}
+	r.advance() // simulates the drawing-phase timer expiring
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing after expiry", r.state.Phase)
+	}
+	if r.state.Featured == "" {
+		t.Fatal("no artist featured — an unlocked draft was discarded")
+	}
+	if len(r.state.Drawings[r.state.Featured]) == 0 {
+		t.Fatal("featured artist's draft strokes were lost")
+	}
+}
+
+func TestEmptyDraftNotFeatured(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	draft(r, "alice") // only alice draws anything
+	r.advance()
+	if r.state.Featured != "alice" {
+		t.Fatalf("featured = %q, want alice (the only non-empty draft)", r.state.Featured)
+	}
+}
+
+func TestHostRevealCarriesGallery(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		draft(r, n)
+	}
+	r.advance()         // → guessing, picks a featured artist
+	r.beginReveal()     // → reveal
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal", r.state.Phase)
+	}
+	host := r.state.viewFor("tv", r.present)
+	if len(host.Gallery) != 4 {
+		t.Fatalf("host gallery has %d drawings, want 4", len(host.Gallery))
+	}
+	if len(host.Gallery["alice"]) == 0 {
+		t.Fatal("host gallery has no strokes for alice")
+	}
+	player := r.state.viewFor("alice", r.present)
+	if player.Gallery != nil {
+		t.Fatalf("player view leaked a gallery: %+v", player.Gallery)
+	}
+}
+
+func TestLockedFlagInView(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.handle(Command{Kind: CmdSubmitDrawing, Player: "alice", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+	}})
+	v := r.state.viewFor("tv", r.present)
+	var aliceLocked, bobLocked bool
+	for _, p := range v.Players {
+		if p.Name == "alice" {
+			aliceLocked = p.Locked
+		}
+		if p.Name == "bob" {
+			bobLocked = p.Locked
+		}
+	}
+	if !aliceLocked {
+		t.Fatal("alice locked in but view shows Locked=false")
+	}
+	if bobLocked {
+		t.Fatal("bob never locked but view shows Locked=true")
+	}
+}
+
+func TestSoloDrawingSkipsGuessing(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	draft(r, "alice") // only alice draws anything
+	r.advance()       // drawing timer fires → beginGuessing
+
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal (one drawing skips guessing)", r.state.Phase)
+	}
+	if r.state.Featured != "alice" {
+		t.Fatalf("featured = %q, want alice", r.state.Featured)
+	}
+	if got := r.state.LastDeltas["alice"]; got != soloPot {
+		t.Fatalf("alice delta = %d, want %d (solo half-pot)", got, soloPot)
+	}
+	if i := r.state.playerIndex("alice"); r.state.Players[i].Score != soloPot {
+		t.Fatalf("alice score = %d, want %d", r.state.Players[i].Score, soloPot)
+	}
+	for _, n := range []string{"bob", "carol", "dave"} {
+		if got := r.state.LastDeltas[n]; got != 0 {
+			t.Fatalf("%s delta = %d, want 0 (no guessing happened)", n, got)
+		}
+	}
+	if len(r.state.FeaturedPast) != 1 || r.state.FeaturedPast[0] != "alice" {
+		t.Fatalf("featuredPast = %v, want [alice]", r.state.FeaturedPast)
+	}
+}
+
+func TestTwoDrawingsStillGuess(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	draft(r, "alice")
+	draft(r, "bob")
+	r.advance()
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing (two drawings is a real round)", r.state.Phase)
+	}
+}
+
+func TestEmptyLockInIsNotADrawing(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	draft(r, "alice") // one real drawing
+	// bob locks in an empty canvas — must not count as a second drawing.
+	r.handle(Command{Kind: CmdSubmitDrawing, Player: "bob", Strokes: nil})
+	r.advance()
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal (empty lock-in is not a drawing)", r.state.Phase)
+	}
+	if r.state.Featured != "alice" {
+		t.Fatalf("featured = %q, want alice", r.state.Featured)
+	}
+	if got := r.state.LastDeltas["bob"]; got != 0 {
+		t.Fatalf("bob delta = %d, want 0 (an empty lock-in must not score)", got)
+	}
+}

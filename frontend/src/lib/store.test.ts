@@ -98,3 +98,34 @@ describe("useGameStore notices", () => {
     expect(useGameStore.getState().notices).toHaveLength(0);
   });
 });
+
+describe("useGameStore myDrawings / gallery", () => {
+  beforeEach(() => useGameStore.getState().reset());
+
+  it("records own drawings and clears them in the lobby", () => {
+    const s = useGameStore.getState();
+    s.recordDrawing(1, [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }]);
+    s.recordDrawing(2, [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }]);
+    expect(Object.keys(useGameStore.getState().myDrawings)).toHaveLength(2);
+
+    // A broadcast that lands back in the lobby (play again) wipes them.
+    useGameStore.getState().applyState({ ...sample, phase: "lobby" });
+    expect(useGameStore.getState().myDrawings).toEqual({});
+  });
+
+  it("keeps own drawings across in-game broadcasts", () => {
+    const s = useGameStore.getState();
+    s.recordDrawing(1, [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }]);
+    useGameStore.getState().applyState({ ...sample, phase: "reveal" });
+    expect(useGameStore.getState().myDrawings[1]).toHaveLength(1);
+  });
+
+  it("applies the host gallery", () => {
+    useGameStore.getState().applyState({
+      ...sample,
+      phase: "reveal",
+      gallery: { ann: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }] },
+    });
+    expect(useGameStore.getState().gallery.ann).toHaveLength(1);
+  });
+});

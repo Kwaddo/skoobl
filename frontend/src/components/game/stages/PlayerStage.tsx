@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCountdown } from "@/hooks/use-countdown";
 import type { GameActions } from "@/hooks/use-game-socket";
+import { downloadStrokesPng, pngFilename } from "@/lib/canvas";
 import type { Stroke } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
-import { DrawingCanvas } from "./DrawingCanvas";
-import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "./icons";
-import { EndedStage, PlayerGrid, Timer } from "./shared";
+import { DrawingCanvas } from "../canvas/DrawingCanvas";
+import { StrokesView } from "../canvas/StrokesView";
+import { EndedStage } from "../display/EndedStage";
+import { PlayerGrid } from "../display/PlayerList";
+import { Timer } from "../display/Timer";
+import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "../icons";
 
 // PlayerStage is the phone controller. It owns the canvas (drawing) and the
 // pick list (guessing); it never renders the drawing — players look at the host
@@ -30,7 +34,7 @@ export function PlayerStage({
     case "reveal":
       return <PlayerReveal name={name} />;
     case "ended":
-      return <EndedStage name={name} />;
+      return <EndedStage name={name} screen="player" />;
     default:
       return null;
   }
@@ -61,6 +65,8 @@ function PlayerDrawing({ actions }: { actions: GameActions }) {
   const prompt = useGameStore((s) => s.yourPrompt);
   const endsAt = useGameStore((s) => s.phaseEndsAt);
   const players = useGameStore((s) => s.players);
+  const round = useGameStore((s) => s.round);
+  const recordDrawing = useGameStore((s) => s.recordDrawing);
   const remaining = useCountdown(endsAt);
   const [submitted, setSubmitted] = useState(false);
   const strokesRef = useRef<Stroke[]>([]);
@@ -76,6 +82,12 @@ function PlayerDrawing({ actions }: { actions: GameActions }) {
   useEffect(() => {
     if (remaining === 0 && !submitted) submit();
   }, [remaining, submitted, submit]);
+
+  // Keep this round's final strokes for the player's own gallery + download,
+  // even if they never tapped Lock-in (the cleanup fires when the round ends).
+  useEffect(() => {
+    return () => recordDrawing(round, strokesRef.current);
+  }, [round, recordDrawing]);
 
   const drawn = players.filter((p) => p.hasDrawn).length;
 
@@ -110,6 +122,7 @@ function PlayerDrawing({ actions }: { actions: GameActions }) {
             onChange={(s) => {
               strokesRef.current = s;
             }}
+            onStrokeEnd={(s) => actions.draftDrawing(s)}
             footer={
               <button
                 type="button"
@@ -170,7 +183,7 @@ function PlayerGuessing({
           . Waiting for the reveal…
         </p>
       ) : (
-        <ul className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto pr-1 sm:grid-cols-3">
+        <ul className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3">
           {options.map((p) => (
             <li key={p.name}>
               <button
@@ -194,6 +207,9 @@ function PlayerGuessing({
 function PlayerReveal({ name }: { name: string }) {
   const reveal = useGameStore((s) => s.reveal);
   const players = useGameStore((s) => s.players);
+  const round = useGameStore((s) => s.round);
+  const myDrawings = useGameStore((s) => s.myDrawings);
+  const mine = myDrawings[round] ?? [];
   const me = players.find((p) => p.name === name);
   const noArtist = !reveal?.artist;
   const youAreArtist = reveal?.artist === name;
@@ -243,6 +259,23 @@ function PlayerReveal({ name }: { name: string }) {
           </>
         )}
       </div>
+
+      {mine.length > 0 && (
+        <div className="card-arcade flex shrink-0 flex-col gap-3 p-4">
+          <span className="font-mono text-xs uppercase tracking-widest text-muted">
+            Your drawing
+          </span>
+          <StrokesView strokes={mine} />
+          <button
+            type="button"
+            className="btn-ghost w-full px-4 py-2.5 text-sm"
+            onClick={() => downloadStrokesPng(mine, pngFilename(round))}
+          >
+            Download PNG ↓
+          </button>
+        </div>
+      )}
+
       <p className="text-center text-sm text-muted">
         Waiting for the host to continue
         <span className="live-dot ml-1 text-primary">●</span>
