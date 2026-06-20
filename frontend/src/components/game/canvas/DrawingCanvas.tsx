@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { HexColorInput, HexColorPicker } from "react-colorful";
 import {
   BRUSHES,
   CANVAS_H,
@@ -164,7 +165,7 @@ export function DrawingCanvas({
                 />
               </button>
               {paletteOpen && (
-                <div className="absolute bottom-full left-0 z-50 mb-2 w-44 rounded-xl border-2 border-border bg-surface-2 p-3 shadow-lg">
+                <div className="absolute bottom-full left-0 z-50 mb-2 w-52 rounded-xl border-2 border-border bg-surface-2 p-3 shadow-lg">
                   <div className="grid grid-cols-4 gap-2">
                     {PALETTE.map((c) => (
                       <button
@@ -184,16 +185,24 @@ export function DrawingCanvas({
                       />
                     ))}
                   </div>
-                  <label className="mt-3 flex items-center justify-between gap-2 font-mono text-[11px] uppercase tracking-widest text-muted">
-                    Custom
-                    <input
-                      type="color"
-                      aria-label="custom color"
-                      value={color}
-                      onChange={(e) => setColor(e.target.value)}
-                      className="h-7 w-10 cursor-pointer rounded-md border-2 border-border bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded [&::-webkit-color-swatch]:border-0"
+                  {/* Universal in-app picker (react-colorful) — renders the same
+                      on every OS/browser, unlike the native <input type=color>. */}
+                  <div className="cc-picker mt-3">
+                    <HexColorPicker color={color} onChange={setColor} />
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-muted">
+                    <span
+                      className="h-5 w-5 shrink-0 rounded-md border border-black/20"
+                      style={{ backgroundColor: color }}
                     />
-                  </label>
+                    <HexColorInput
+                      color={color}
+                      onChange={setColor}
+                      prefixed
+                      aria-label="hex color"
+                      className="w-full rounded-md border-2 border-border bg-surface px-2 py-1 text-foreground uppercase tracking-widest outline-none focus:border-foreground"
+                    />
+                  </div>
                 </div>
               )}
             </div>

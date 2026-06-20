@@ -6,7 +6,73 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <title>skoobl</title>
+    <title>skoobl - online multiplayer draw and guess game</title>
+
+    <!-- Link preview / social embed. These meta tags are what render when the
+         URL is pasted into chat apps, social media, or search results: the
+         title, the description of what the game is, and the preview image. -->
+    <meta
+      name="description"
+      content="skoobl is a free online multiplayer draw and guess party game. One player draws a secret word while everyone else races to guess it in real time. Create a private room, play with friends, pick English or Arabic word packs, or bring your own custom words."
+    />
+    <meta name="theme-color" content="#08080a" />
+
+    <!-- Open Graph (Facebook, Discord, WhatsApp, iMessage, LinkedIn, etc.) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="skoobl" />
+    <meta property="og:url" content="https://skoobl-afqe-alimohsen999.dilmune.app/" />
+    <meta property="og:title" content="skoobl - online multiplayer draw and guess game" />
+    <meta
+      property="og:description"
+      content="A free online multiplayer draw and guess party game. One player draws a secret word, everyone else races to guess it. Private rooms, English or Arabic word packs, and custom words."
+    />
+    <meta property="og:image" content="https://skoobl-afqe-alimohsen999.dilmune.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="skoobl draw and guess game" />
+
+    <!-- Twitter / X card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="skoobl - online multiplayer draw and guess game" />
+    <meta
+      name="twitter:description"
+      content="A free online multiplayer draw and guess party game. Draw a secret word, race to guess. Private rooms, English or Arabic word packs, and custom words."
+    />
+    <meta name="twitter:image" content="https://skoobl-afqe-alimohsen999.dilmune.app/og.png" />
+
+    <!-- Search engine signals. canonical tells crawlers the one true URL for
+         this page (avoids duplicate-content splits); robots invites indexing
+         and link-following. -->
+    <link rel="canonical" href="https://skoobl-afqe-alimohsen999.dilmune.app/" />
+    <meta name="robots" content="index, follow" />
+    <meta
+      name="keywords"
+      content="skoobl, draw and guess, drawing game, multiplayer party game, online drawing game, guess the drawing, pictionary online, Arabic word game, free browser game"
+    />
+
+    <!-- Structured data (schema.org). Lets Google show a rich result and
+         understand this is a free, browser-based multiplayer game. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "skoobl",
+        "url": "https://skoobl-afqe-alimohsen999.dilmune.app/",
+        "image": "https://skoobl-afqe-alimohsen999.dilmune.app/og.png",
+        "description": "A free online multiplayer draw and guess party game. One player draws a secret word while everyone else races to guess it in real time. Private rooms, English or Arabic word packs, and custom words.",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Any (web browser)",
+        "browserRequirements": "Requires a modern web browser with JavaScript enabled",
+        "inLanguage": ["en", "ar"],
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
+
     <!-- Apply the saved theme before first paint so there's no flash. -->
     <script>
       (function () {
@@ -27,11 +93,83 @@
       href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="/assets/index-jU2X4SKG.js"></script>
+
+    <!-- Styling for the pre-render landing copy below. It is the only thing
+         painted before the JS bundle (and its index.css) loads, and it is also
+         what JS-less crawlers and AI fetchers read. Once React mounts it wipes
+         #root, so users see this for ~one frame; index.css then takes over. -->
+    <style>
+      .seo-landing {
+        max-width: 40rem;
+        margin: 0 auto;
+        padding: 4rem 1.5rem;
+        font-family: "Hanken Grotesk", system-ui, sans-serif;
+        color: #f6f6f4;
+        background: #08080a;
+        min-height: 100dvh;
+      }
+      .seo-landing h1 {
+        font-family: "Unbounded", system-ui, sans-serif;
+        font-size: 2.5rem;
+        font-weight: 900;
+        margin: 0 0 0.75rem;
+      }
+      .seo-landing h2 {
+        font-family: "Unbounded", system-ui, sans-serif;
+        font-weight: 800;
+        font-size: 1.25rem;
+        margin: 2rem 0 0.5rem;
+      }
+      .seo-landing p,
+      .seo-landing li {
+        line-height: 1.6;
+        color: #c9c9cf;
+      }
+      body {
+        margin: 0;
+        background: #08080a;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-C6_4Yah9.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/theme-C31hdB3V.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-BFY4KJpD.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-BKeH2Rxx.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Pre-render / no-JS landing content. Real indexable text for search
+           engines and AI answer engines. React replaces this on mount. -->
+      <main class="seo-landing">
+        <h1>skoobl — online multiplayer draw &amp; guess game</h1>
+        <p>
+          <strong>skoobl</strong> is a free, browser-based multiplayer party
+          game. One player is given a secret word and draws it on a live shared
+          canvas while everyone else races to guess what it is in real time.
+          Quick rounds, no sign-up, no install — just open the link and play
+          with friends.
+        </p>
+
+        <h2>How to play</h2>
+        <ol>
+          <li>Create a private room and share the join link or code.</li>
+          <li>Each round, one player draws the secret word on the canvas.</li>
+          <li>Everyone else types guesses; fastest correct guess scores most.</li>
+          <li>Take turns drawing and guessing until the game ends.</li>
+        </ol>
+
+        <h2>Features</h2>
+        <ul>
+          <li>Real-time multiplayer drawing and guessing</li>
+          <li>Private rooms you can share with a link or code</li>
+          <li>English and Arabic word packs, or bring your own custom words</li>
+          <li>Works in any modern browser on desktop and mobile</li>
+          <li>Free to play, no account or download required</li>
+        </ul>
+
+        <p>
+          Loading the game… if it does not start, enable JavaScript in your
+          browser.
+        </p>
+      </main>
+    </div>
   </body>
 </html>

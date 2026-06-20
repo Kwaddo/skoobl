@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Segmented } from "@/components/Segmented";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { API_BASE } from "@/lib/config";
 import { takeFlash } from "@/lib/flash";
 import { recallName, rememberName } from "@/lib/identity";
@@ -36,6 +37,12 @@ function Home() {
   const [error, setError] = useState<string | null>(flash?.message ?? null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
+  // Hosting is the shared big screen and can't run on a phone, so on mobile we
+  // hide the Host tab and pin the form to Join. Tracked live in case of resize.
+  const isMobile = useIsMobile();
+  useEffect(() => {
+    if (isMobile && tab === "host") setTab("join");
+  }, [isMobile, tab]);
 
   const cleanName = name.trim();
   const cleanCode = code.trim().toLowerCase();
@@ -120,16 +127,18 @@ function Home() {
         className="card-arcade rise flex flex-col gap-6 p-6 sm:p-8"
         style={{ "--d": "90ms" } as React.CSSProperties}
       >
-        {/* tabs */}
-        <Segmented
-          value={tab}
-          onChange={(v) => switchTab(v)}
-          options={[
-            { value: "join", label: "Join a room" },
-            { value: "host", label: "Host a game" },
-          ]}
-          itemClassName="flex-1 px-4 py-2.5 text-sm font-bold"
-        />
+        {/* tabs — hosting needs a big screen, so phones only get to join */}
+        {!isMobile && (
+          <Segmented
+            value={tab}
+            onChange={(v) => switchTab(v)}
+            options={[
+              { value: "join", label: "Join a room" },
+              { value: "host", label: "Host a game" },
+            ]}
+            itemClassName="flex-1 px-4 py-2.5 text-sm font-bold"
+          />
+        )}
 
         {/* swapped per tab — keyed so it crossfades in on each switch. Join asks
             for a name + code; hosting needs neither (the host is the screen). */}

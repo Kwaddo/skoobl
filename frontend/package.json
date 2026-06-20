@@ -20,6 +20,7 @@
     "lucide-react": "^1.17.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
+    "react-colorful": "^5.7.0",
     "react-dom": "^19.2.7",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^2.6.0",
