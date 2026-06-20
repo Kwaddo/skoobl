@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math"
 	"math/rand/v2"
 	"regexp"
 	"strings"
@@ -71,8 +72,13 @@ const (
 	canvasW = 1000
 	canvasH = 750
 
-	// Score awarded to a player who correctly identifies the artist.
-	pointsPerCorrect = 100
+	// pointsMax caps both per-round earnings: a guesser's fastest correct guess and
+	// the artist's pot when nobody identifies them. Equal maxes keep a featured
+	// round worth about the same as a round spent guessing.
+	pointsMax = 100
+	// speedSpread is how much of a correct guess rides on speed: it scores from
+	// pointsMax (instant) down to pointsMax-speedSpread (at the buzzer).
+	speedSpread = 50
 )
 
 // hexColor matches #rgb, #rrggbb, and #rrggbbaa. Stroke colors that don't match
@@ -293,7 +299,7 @@ func (r *Room) handle(c Command) {
 		}
 	case CmdHostPrune:
 		if r.host != nil && !r.host.connected && r.host.gen == c.Gen {
-			r.reap()
+			r.closeRoom()
 		}
 	case CmdConfigure:
 		if c.Player == r.state.Host && r.state.Phase == PhaseLobby && c.Config != nil {
@@ -316,7 +322,9 @@ func (r *Room) handle(c Command) {
 			}
 		}
 	case CmdReturnToLobby:
-		if c.Player == r.state.Host && r.state.Phase == PhaseEnded {
+		// The host can send everyone back to the lobby from the final scoreboard
+		// (play again) or mid-game (abandon the current game before it ends).
+		if c.Player == r.state.Host && r.state.Phase != PhaseLobby {
 			r.returnToLobby()
 		}
 	case CmdAdvance:
@@ -449,7 +457,7 @@ func (r *Room) prune(c Command) {
 func (r *Room) leave(c Command) {
 	r.unsubscribe(c.Unsub)
 	if r.host != nil && c.Player == r.state.Host {
-		r.reap()
+		r.closeRoom()
 		return
 	}
 	if _, ok := r.present[c.Player]; !ok {
@@ -458,19 +466,37 @@ func (r *Room) leave(c Command) {
 	r.removePlayer(c.Player)
 }
 
+// closeRoom tears the room down when the host departs. It sends a final frame
+// flagged Closed to the remaining players first — the room is the shared screen
+// and holds all advance authority, so without it nothing can continue — then
+// reaps. Run skips its post-handle broadcast once reaped, so this is the players'
+// last frame and the cue for their clients to return to the main menu.
+func (r *Room) closeRoom() {
+	r.state.Closed = true
+	r.broadcast()
+	r.reap()
+}
+
 // removePlayer drops a player from presence and the roster, reaps a room that
-// has no players and no connected host, and lets a departure complete the
-// current phase for those who remain. The host is a spectator (never in
-// Players), so there is no host promotion here.
+// has no players and no connected host, bounces a now-undersized game back to
+// the lobby, and otherwise lets a departure complete the current phase for those
+// who remain. The host is a spectator (never in Players), so there is no host
+// promotion here. Called only from leave and prune — i.e. on a real departure,
+// never on a transient disconnect — so a refresh can't trigger the bounce.
 func (r *Room) removePlayer(name string) {
 	delete(r.present, name)
 	if i := r.state.playerIndex(name); i >= 0 {
 		r.state.Players = append(r.state.Players[:i], r.state.Players[i+1:]...)
 	}
-	if len(r.state.Players) == 0 {
-		if !r.hostConnected() {
-			r.reap()
-		}
+	if len(r.state.Players) == 0 && !r.hostConnected() {
+		r.reap()
+		return
+	}
+	// A real departure that drops a running game below the minimum abandons the
+	// round: there aren't enough players for "who drew this?" to work, so send
+	// everyone back to the lobby (scores reset) rather than limp on under-strength.
+	if r.state.Phase.inGame() && len(r.state.Players) < minPlayers {
+		r.returnToLobby()
 		return
 	}
 	switch r.state.Phase {
@@ -521,6 +547,8 @@ func (r *Room) beginRound(n int) {
 	r.state.Round = n
 	r.state.Drawings = map[string][]Stroke{}
 	r.state.Guesses = map[string]string{}
+	r.state.GuessTimes = map[string]int64{}
+	r.state.LastDeltas = nil
 	r.state.Featured = ""
 	r.state.Prompt = r.pickPrompt()
 	r.startPhase(PhaseDrawing, r.state.DrawMs)
@@ -599,20 +627,75 @@ func (r *Room) pickFeatured() string {
 	return ""
 }
 
-// beginReveal scores the round (each correct guesser earns points) and opens the
-// host-advanced reveal phase.
-func (r *Room) beginReveal() {
-	for guesser, guess := range r.state.Guesses {
-		if guess != r.state.Featured || guesser == r.state.Featured {
-			continue
-		}
-		if i := r.state.playerIndex(guesser); i >= 0 {
-			r.state.Players[i].Score += pointsPerCorrect
-		}
+// speedScore converts a correct guess's timestamp into points on a linear curve
+// across the guess window: pointsMax for an instant guess down to
+// pointsMax-speedSpread at the buzzer. Call it during beginReveal, before
+// startPhase resets the phase clock. Timestamps outside the window are clamped.
+func (r *Room) speedScore(guessedAt int64) int {
+	if r.state.GuessMs <= 0 {
+		return pointsMax
 	}
+	start := r.state.PhaseEndsAt - int64(r.state.GuessMs)
+	f := float64(guessedAt-start) / float64(r.state.GuessMs)
+	f = clampF(f, 0, 1)
+	return int(math.Round(float64(pointsMax) - float64(speedSpread)*f))
+}
+
+// artistPot is the featured artist's round score: the full pot when nobody
+// identifies them, zero when everyone does, linear between. eligible is the count
+// of players who could have identified them.
+func artistPot(correct, eligible int) int {
+	if eligible <= 0 {
+		return pointsMax
+	}
+	return int(math.Round(float64(pointsMax) * (1 - float64(correct)/float64(eligible))))
+}
+
+// beginReveal scores the round and opens the host-advanced reveal phase. Correct
+// guessers earn speed points (faster = more); the featured artist earns a pot that
+// shrinks with each player who identifies them. Scores are computed before
+// startPhase resets the clock, so speedScore reads the live guess window.
+func (r *Room) beginReveal() {
+	var deltas map[string]int
 	if r.state.Featured != "" {
+		deltas = map[string]int{}
+		// eligible = everyone who could have identified the artist: connected
+		// non-artists, unioned with any correct guesser who dropped after guessing
+		// (so a correct guess can't be erased by disconnecting).
+		eligible := map[string]bool{}
+		for _, p := range r.state.Players {
+			if p.Name == r.state.Featured {
+				continue
+			}
+			if pr, ok := r.present[p.Name]; ok && pr.connected {
+				eligible[p.Name] = true
+			}
+		}
+		correct := 0
+		for guesser, guess := range r.state.Guesses {
+			if guesser == r.state.Featured || guess != r.state.Featured {
+				continue
+			}
+			correct++
+			eligible[guesser] = true
+			ts, ok := r.state.GuessTimes[guesser]
+			if !ok {
+				ts = r.state.PhaseEndsAt // no recorded time (e.g. restored mid-round) → score as the buzzer
+			}
+			if i := r.state.playerIndex(guesser); i >= 0 {
+				pts := r.speedScore(ts)
+				r.state.Players[i].Score += pts
+				deltas[guesser] += pts
+			}
+		}
+		pot := artistPot(correct, len(eligible))
+		if i := r.state.playerIndex(r.state.Featured); i >= 0 {
+			r.state.Players[i].Score += pot
+			deltas[r.state.Featured] += pot
+		}
 		r.state.FeaturedPast = append(r.state.FeaturedPast, r.state.Featured)
 	}
+	r.state.LastDeltas = deltas
 	r.startPhase(PhaseReveal, 0)
 }
 
@@ -624,6 +707,8 @@ func (r *Room) endGame() {
 	r.state.Prompt = ""
 	r.state.Drawings = nil
 	r.state.Guesses = nil
+	r.state.GuessTimes = nil
+	r.state.LastDeltas = nil
 	r.state.Featured = ""
 }
 
@@ -638,6 +723,8 @@ func (r *Room) returnToLobby() {
 	r.state.Prompt = ""
 	r.state.Drawings = nil
 	r.state.Guesses = nil
+	r.state.GuessTimes = nil
+	r.state.LastDeltas = nil
 	r.state.Featured = ""
 	r.state.FeaturedPast = nil
 	for i := range r.state.Players {
@@ -685,7 +772,11 @@ func (r *Room) submitGuess(c Command) {
 	if r.state.Guesses == nil {
 		r.state.Guesses = map[string]string{}
 	}
+	if r.state.GuessTimes == nil {
+		r.state.GuessTimes = map[string]int64{}
+	}
 	r.state.Guesses[c.Player] = c.Guess
+	r.state.GuessTimes[c.Player] = time.Now().UnixMilli()
 	if r.allGuessed() {
 		r.beginReveal()
 	}

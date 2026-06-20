@@ -104,6 +104,7 @@ body {
     radial-gradient(44rem 44rem at 12% -10%, var(--glow-1), transparent 70%),
     radial-gradient(40rem 40rem at 108% 112%, var(--glow-2), transparent 70%);
   background-attachment: fixed;
+  overflow: hidden;
   transition:
     background-color 0.5s var(--ease-out-soft),
     color 0.5s var(--ease-out-soft);
@@ -174,14 +175,18 @@ body::after {
    the whole game; an accented variant on anything clickable; text caret in
    inputs; not-allowed on disabled buttons. The canvas keeps its own crosshair. */
 body {
-  cursor: url("/cursor.svg") 4 4, auto;
+  cursor:
+    url("/cursor.svg") 4 4,
+    auto;
 }
 a,
 button:not(:disabled),
 [role="button"],
 summary,
 .cursor-pointer {
-  cursor: url("/cursor-pointer.svg") 4 4, pointer;
+  cursor:
+    url("/cursor-pointer.svg") 4 4,
+    pointer;
 }
 button:disabled {
   cursor: not-allowed;

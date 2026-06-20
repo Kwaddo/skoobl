@@ -7,6 +7,7 @@ import { useGameStore } from "@/lib/store";
 import { HostStage } from "./HostStage";
 import { PlayerStage } from "./PlayerStage";
 import { ErrorPanel, RoomHeader } from "./shared";
+import { Toasts } from "./Toasts";
 
 export type Screen = "host" | "player";
 
@@ -21,12 +22,41 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
     spectator: screen === "host",
   });
   const error = useGameStore((s) => s.error);
+  const phase = useGameStore((s) => s.phase);
+  const closed = useGameStore((s) => s.closed);
+  const isHost = screen === "host";
+  const inGame = phase !== "lobby" && phase !== "ended";
 
   // Leave now: tell the room (immediate host-close / player reap), then go home.
+  // The host leaving closes the room for everyone, so confirm before doing it.
   const handleLeave = useCallback(() => {
+    if (isHost && !window.confirm("Leave and close the room for everyone?")) {
+      return;
+    }
     actions.leave();
     navigate({ to: "/" });
-  }, [actions, navigate]);
+  }, [actions, navigate, isHost]);
+
+  // Host-only: abandon the current game and send everyone back to the lobby
+  // (scores reset). Stays in the room — nobody is kicked.
+  const handleBackToLobby = useCallback(() => {
+    if (
+      !window.confirm(
+        "End the current game and send everyone back to the lobby?",
+      )
+    ) {
+      return;
+    }
+    actions.returnToLobby();
+  }, [actions]);
+
+  // The host left (or its display dropped past grace): the room is gone. Kick
+  // the player to the main menu with a one-shot message in the home banner.
+  useEffect(() => {
+    if (!closed) return;
+    setFlash({ message: "The host left — the game ended.", tab: "join" });
+    navigate({ to: "/" });
+  }, [closed, navigate]);
 
   // Recoverable join rejections (name taken, wrong code, room full, …) shouldn't
   // hijack the whole screen. Bounce back to the home form with a small inline
@@ -51,7 +81,7 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
   // The host is a shared "TV": locked to the viewport height and never scrolls,
   // so nothing jumps around for the players watching. The player is a phone
   // controller: narrow and free to scroll.
-  const isHost = screen === "host";
+  //
   // Both screens lock to the viewport and never scroll the page; each phase
   // fits/centers/squeezes its own content. Host is a wide shared display, the
   // player a narrower controller.
@@ -63,7 +93,13 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
 
   return (
     <main className={`grain-above ${shell}`}>
-      <RoomHeader code={code} name={name} onLeave={handleLeave} />
+      <Toasts />
+      <RoomHeader
+        code={code}
+        name={name}
+        onLeave={handleLeave}
+        onBackToLobby={isHost && inGame ? handleBackToLobby : undefined}
+      />
       <section className="flex min-h-0 flex-1 flex-col">
         {/* phases below fill, centre, or scroll within this fixed area */}
         {isHost ? (
