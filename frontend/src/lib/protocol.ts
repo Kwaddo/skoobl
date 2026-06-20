@@ -51,6 +51,9 @@ export interface GameState {
   drawMs?: number;
   guessMs?: number;
   phaseEndsAt?: number;
+  // Server clock at the moment this state was sent (unix ms). Used to correct the
+  // countdown for device clock skew so every client agrees on the time left.
+  serverNow?: number;
   // Recipient-specific fields.
   you?: string;
   yourPrompt?: string;

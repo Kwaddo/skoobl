@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
+import { now as serverTime } from "@/lib/clock";
 
 // useCountdown returns whole seconds remaining until `endsAt` (a unix-ms
 // timestamp from the server), ticking down once a second. Returns null when
-// there's no active deadline. The clock is the server's, so all clients agree.
+// there's no active deadline. It reads the server-anchored clock (see lib/clock),
+// not the raw device clock, so a host and a player with skewed clocks still show
+// the same time left.
 export function useCountdown(endsAt: number): number | null {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => serverTime());
 
   useEffect(() => {
     if (!endsAt) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 250);
+    setNow(serverTime());
+    const id = setInterval(() => setNow(serverTime()), 250);
     return () => clearInterval(id);
   }, [endsAt]);
 

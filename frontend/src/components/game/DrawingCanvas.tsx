@@ -87,11 +87,11 @@ export function DrawingCanvas({
     // toolbar moves to a column beside the canvas (instead of below, where it'd
     // get cut off) so drawing always has room. ↓ tuned at 760px tall.
     <div className="flex h-full min-h-0 flex-col items-stretch justify-center gap-3 short:flex-row short:justify-center short:gap-4">
-      {/* Tall: the canvas sizes to its width and the whole canvas+tools block is
-          centred vertically (tools sit right beneath the canvas). Short: the
-          canvas area takes the width (flex-1) and fills the height beside the
-          tools. flex (not grid) makes max-h-full reliably bound the canvas. */}
-      <div className="flex min-h-0 items-center justify-center short:flex-1">
+      {/* Canvas area grows to fill the leftover space (flex-1) in both layouts:
+          stacked, it claims the height above the tools so the canvas scales up as
+          large as the phone allows; short/landscape, it claims the width beside
+          the tools. flex (not grid) makes max-h-full reliably bound the canvas. */}
+      <div className="flex min-h-0 flex-1 items-center justify-center">
         <canvas
           ref={ref}
           width={CANVAS_W}

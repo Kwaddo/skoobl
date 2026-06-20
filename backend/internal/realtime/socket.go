@@ -200,11 +200,14 @@ func (c *conn) emitError(msg string) {
 
 // stateMap converts GameState to a map via its JSON tags so the payload keys
 // match the frontend protocol exactly, independent of the parser's struct
-// encoding.
+// encoding. It stamps serverNow (the server's clock at emit time) so clients can
+// correct for device clock skew when rendering the phaseEndsAt countdown —
+// otherwise a host whose clock differs from a player's shows a different timer.
 func stateMap(s game.GameState) map[string]any {
 	b, _ := json.Marshal(s)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
+	m["serverNow"] = time.Now().UnixMilli()
 	return m
 }
 

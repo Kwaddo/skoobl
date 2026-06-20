@@ -5,8 +5,11 @@
 @import "tw-animate-css";
 
 /* `short:` applies when the viewport is too short for the stacked drawing layout
-   — the player then puts the tools beside the canvas. */
-@custom-variant short (@media (max-height: 760px));
+   *and* wide enough to put the tools beside the canvas — i.e. a short, landscape
+   window. The landscape gate (min-aspect-ratio) keeps it from firing on phones in
+   portrait, whose height can dip under 760px (small screens, browser chrome) yet
+   still want the big stacked canvas above the palette, not a squished side-by-side. */
+@custom-variant short (@media (max-height: 760px) and (min-aspect-ratio: 1/1));
 
 /* ── skoobl: black & white arcade ───────────────────────────────────────────
    Pure monochrome UI — ink-black field, chalk-white ink, chunky "key-cap"
