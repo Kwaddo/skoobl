@@ -44,7 +44,7 @@ function PlayerLobby() {
         You're in! Waiting for the host to start
         <span className="live-dot ml-1 text-primary">●</span>
       </p>
-      <div className="flex min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         <div className="mb-3 flex shrink-0 items-baseline justify-between">
           <h2 className="font-display text-xl font-bold">Players</h2>
           <span className="font-mono text-sm text-muted">{players.length}</span>
@@ -235,6 +235,9 @@ function PlayerReveal({ name }: { name: string }) {
               </span>
             </p>
             <p className="mt-1 font-mono text-2xl font-bold text-primary">
+              {me?.roundScore != null && me.roundScore > 0 && (
+                <span className="mr-2">+{me.roundScore}</span>
+              )}
               {me?.score ?? 0} pts
             </p>
           </>

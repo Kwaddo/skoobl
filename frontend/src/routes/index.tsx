@@ -5,6 +5,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { API_BASE } from "@/lib/config";
 import { takeFlash } from "@/lib/flash";
 import { recallName, rememberName } from "@/lib/identity";
+import { codeFromSearch } from "@/lib/join-link";
 import { preflightJoin } from "@/lib/preflight";
 
 export const Route = createFileRoute("/")({
@@ -22,13 +23,16 @@ function Home() {
   // from the one-shot flash so the message shows inline and the fields are
   // prefilled for a quick retry.
   const [flash] = useState(takeFlash);
+  // A scanned QR lands here with ?code=… ; prefill it and show the Join tab so
+  // the player only has to enter a name. (Join is already the default tab.)
+  const [scannedCode] = useState(() => codeFromSearch(window.location.search));
   const [tab, setTab] = useState<Tab>(flash?.tab ?? "join");
   // Prefill the player's last name, but never the auto "Host" identity.
   const [name, setName] = useState(() => {
     const n = recallName();
     return n === HOST_NAME ? "" : n;
   });
-  const [code, setCode] = useState(flash?.code ?? "");
+  const [code, setCode] = useState(flash?.code ?? scannedCode);
   const [error, setError] = useState<string | null>(flash?.message ?? null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
@@ -129,7 +133,10 @@ function Home() {
 
         {/* swapped per tab — keyed so it crossfades in on each switch. Join asks
             for a name + code; hosting needs neither (the host is the screen). */}
-        <div key={tab} className="rise flex min-h-[11rem] flex-col justify-center gap-6">
+        <div
+          key={tab}
+          className="rise flex min-h-44 flex-col justify-center gap-6"
+        >
           {tab === "join" ? (
             <>
               <label className="flex flex-col gap-2">

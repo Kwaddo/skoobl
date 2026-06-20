@@ -67,4 +67,27 @@ describe("stage split", () => {
     expect(queryByText(/play again/i)).toBeNull();
     expect(getByText(/waiting for the host/i)).toBeTruthy();
   });
+
+  it("scoreboard shows the round delta during reveal", () => {
+    useGameStore.setState({
+      phase: "reveal",
+      players: [{ name: "ann", score: 167, roundScore: 67 }],
+      reveal: { artist: "ann", prompt: "cat" },
+    });
+    const { getByText } = render(<HostStage name="tv" actions={noopActions} />);
+    expect(getByText("+67")).toBeTruthy();
+  });
+
+  it("player reveal shows the points earned this round", () => {
+    useGameStore.setState({
+      phase: "reveal",
+      players: [{ name: "ann", score: 92, roundScore: 92 }],
+      reveal: { artist: "bob", prompt: "cat" },
+      youAreArtist: false,
+    });
+    const { getByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    expect(getByText("+92")).toBeTruthy();
+  });
 });

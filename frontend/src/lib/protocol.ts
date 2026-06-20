@@ -32,6 +32,7 @@ export interface Player {
   hasDrawn?: boolean;
   hasGuessed?: boolean;
   correct?: boolean;
+  roundScore?: number;
 }
 
 export interface Reveal {
@@ -57,6 +58,8 @@ export interface GameState {
   youAreArtist?: boolean;
   yourGuess?: string;
   reveal?: Reveal | null;
+  // Final frame sent when the host leaves: the room is gone, kick to the menu.
+  closed?: boolean;
 }
 
 // GameConfig is the host's lobby setup sent via the "configure" event.
