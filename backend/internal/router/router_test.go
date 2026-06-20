@@ -11,7 +11,7 @@ import (
 
 func newRouter() http.Handler {
 	h := hub.New()
-	return New(h, realtime.NewServer(h, nil), nil)
+	return New(h, realtime.NewServer(h, nil), nil, "")
 }
 
 func TestHealthzOK(t *testing.T) {
@@ -49,7 +49,7 @@ func TestSocketIOMounted(t *testing.T) {
 func corsRouter() http.Handler {
 	h := hub.New()
 	origins := []string{"http://localhost:5173"}
-	return New(h, realtime.NewServer(h, origins), origins)
+	return New(h, realtime.NewServer(h, origins), origins, "")
 }
 
 func TestCORSReflectsAllowedOrigin(t *testing.T) {
