@@ -8,29 +8,37 @@ export function PlayerGrid({ players }: { players: Player[] }) {
   if (players.length === 0) {
     return (
       <div className="card-arcade flex flex-col items-center gap-2 border-dashed px-6 py-10 text-center">
-        <Eyes className="float h-9 w-9 text-foreground" />
+        <Eyes className="float h-10 w-10 text-foreground" />
         <p className="font-display text-lg font-bold">Nobody here yet</p>
-        <p className="text-sm text-muted">
-          Share the code above to fill the room.
+        <p className="font-hand text-xl text-muted">
+          share the code above to fill the room.
         </p>
       </div>
     );
   }
   return (
-    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    // p-1.5 gives the cards' hover-lift and hard offset shadow room inside the
+    // scrolling parent, so rotating/lifting tiles never clip against its edges.
+    <ul className="grid grid-cols-2 gap-3 p-1.5 sm:grid-cols-3">
       {players.map((p, i) => (
         <li
           key={p.name}
           className="card-arcade card-hover pop flex items-center gap-3 p-3"
           style={{ "--d": `${i * 40}ms` } as React.CSSProperties}
         >
-          <Avatar name={p.name} className="h-10 w-10 rounded-xl" />
-          <span className="flex min-w-0 flex-col">
-            <span dir="auto" className="truncate font-semibold">
+          <Avatar
+            name={p.name}
+            className="h-10 w-10 -rotate-3 rounded-xl border-2 border-foreground"
+          />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span dir="auto" className="truncate font-bold">
               {p.name}
             </span>
             {p.name === host && (
-              <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-foreground">
+              <span
+                className="sticker w-fit px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest text-foreground"
+                style={{ "--rot": "-3deg" } as React.CSSProperties}
+              >
                 <Crown className="h-3 w-3" /> leader
               </span>
             )}
@@ -51,7 +59,7 @@ export function Roster({
   mode: "drawing" | "guessing";
 }) {
   return (
-    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <ul className="grid grid-cols-2 gap-3 p-1.5 sm:grid-cols-3">
       {players.map((p, i) => {
         // Drawing phase shows real per-player lock-in (p.locked, not p.hasDrawn:
         // a draft is auto-saved on every stroke, so hasDrawn flips true long
@@ -66,17 +74,23 @@ export function Roster({
           <li
             key={p.name}
             className={`card-arcade pop flex items-center gap-3 p-3 ${
-              done ? "border-foreground" : "opacity-60"
+              done ? "border-foreground" : "opacity-55"
             }`}
             style={{ "--d": `${i * 40}ms` } as React.CSSProperties}
           >
-            <Avatar name={p.name} className="h-10 w-10 rounded-xl" />
-            <span className="flex min-w-0 flex-col">
-              <span dir="auto" className="truncate font-semibold">
+            <Avatar
+              name={p.name}
+              className="h-10 w-10 -rotate-3 rounded-xl border-2 border-foreground"
+            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span dir="auto" className="truncate font-bold">
                 {p.name}
               </span>
               {done ? (
-                <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-foreground">
+                <span
+                  className="sticker sticker-solid stick-on w-fit px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest"
+                  style={{ "--rot": "-3deg" } as React.CSSProperties}
+                >
                   <Check className="h-3 w-3" /> {doneLabel}
                 </span>
               ) : (

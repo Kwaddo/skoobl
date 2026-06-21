@@ -18,7 +18,7 @@ export function CodeCard({ code }: { code: string }) {
     setTimeout(() => setCopied(false), 1400);
   };
   return (
-    <div className="card-arcade flex shrink-0 items-center justify-between gap-4 p-5">
+    <div className="ink-block flex shrink-0 items-center justify-between gap-4 p-5">
       <div className="flex flex-col gap-1">
         <span className="font-mono text-xs uppercase tracking-widest text-muted">
           Room code
@@ -28,19 +28,21 @@ export function CodeCard({ code }: { code: string }) {
           onClick={copy}
           className="group flex items-center gap-3 text-left"
         >
-          <span className="font-mono text-3xl font-bold uppercase tracking-[0.2em] text-foreground">
+          <span className="font-display text-3xl font-black uppercase tracking-[0.18em] text-foreground">
             {code}
           </span>
-          <span className="rounded-lg border border-border px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-muted transition-colors group-hover:border-foreground group-hover:text-foreground">
+          <span
+            className="sticker px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-muted transition-colors group-hover:text-foreground"
+            style={{ "--rot": "2deg" } as React.CSSProperties}
+          >
             {copied ? "copied!" : "copy link"}
           </span>
         </button>
-        <span className="mt-1 font-mono text-[11px] uppercase tracking-widest text-muted">
-          scan to join →
-        </span>
+        <span className="mt-1 font-hand text-xl text-muted">scan to join →</span>
       </div>
-      {/* Fixed dark-on-light tile so the code scans reliably in either theme. */}
-      <div className="shrink-0 rounded-xl bg-white p-2">
+      {/* Fixed dark-on-light tile so the code scans reliably in either theme;
+          taped to the card like a print-out. */}
+      <div className="tape shrink-0 rotate-2 rounded-lg border-2 border-[#1b1813] bg-white p-2">
         <QRCodeSVG
           value={joinUrl}
           size={104}

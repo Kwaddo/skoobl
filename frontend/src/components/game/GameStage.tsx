@@ -2,7 +2,7 @@ import { Navigate, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { CONNECTION_ERROR, useGameSocket } from "@/hooks/use-game-socket";
 import { setFlash } from "@/lib/flash";
-import { recallName } from "@/lib/identity";
+import { recallHostPlay, recallName } from "@/lib/identity";
 import { useGameStore } from "@/lib/store";
 import { ErrorPanel } from "./display/ErrorPanel";
 import { RoomHeader } from "./display/RoomHeader";
@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./overlays/ConfirmDialog";
 import { Toasts } from "./overlays/Toasts";
 import { HostStage } from "./stages/HostStage";
 import { PlayerStage } from "./stages/PlayerStage";
+import { PlayingHostStage } from "./stages/PlayingHostStage";
 
 export type Screen = "host" | "player";
 
@@ -20,20 +21,35 @@ export type Screen = "host" | "player";
 export function GameStage({ code, screen }: { code: string; screen: Screen }) {
   const name = recallName();
   const navigate = useNavigate();
+  // A host can be the non-playing big screen (display) or a player who also owns
+  // the room (play-along). The home screen chose this; it drives how this client
+  // joins. (A regular player can also *become* host later via a hand-off — see
+  // amHost below — which is derived from live state, not the join.)
+  const playingHostRoute = screen === "host" && recallHostPlay();
+  const bigScreen = screen === "host" && !playingHostRoute;
   const actions = useGameSocket(code, name ?? "", {
-    spectator: screen === "host",
+    spectator: bigScreen,
+    play: playingHostRoute,
   });
   const error = useGameStore((s) => s.error);
   const phase = useGameStore((s) => s.phase);
   const closed = useGameStore((s) => s.closed);
-  const isHost = screen === "host";
+  const storeHost = useGameStore((s) => s.host);
+  const hostPlays = useGameStore((s) => s.hostPlays);
+  // I own the room if I joined as the host, or I've been promoted to host (the
+  // previous host left and the room handed off to me).
+  const amHost = !!name && storeHost === name;
+  const isHost = screen === "host" || amHost;
+  // The playing-host controller view: the play-along host, or any player who is
+  // now the host of a no-TV room (after a hand-off).
+  const showPlayingHost = playingHostRoute || (amHost && hostPlays);
   const inGame = phase !== "lobby" && phase !== "ended";
-  // Which confirmation modal is open (host-only destructive actions).
+  // Which confirmation modal is open (host-only actions).
   const [confirming, setConfirming] = useState<null | "leave" | "lobby">(null);
 
-  // Leave now: tell the room (immediate host-close / player reap), then go home.
-  // The host leaving closes the room for everyone, so confirm first (in-app
-  // modal). Players leave straight away — nothing to warn about.
+  // Leave now: tell the room (host hands off to another player; player reaps an
+  // empty room), then go home. The host leaving no longer ends the game, but it
+  // does hand off control, so confirm first. Players leave straight away.
   const handleLeave = useCallback(() => {
     if (isHost) {
       setConfirming("leave");
@@ -92,11 +108,14 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
   // Both screens lock to the viewport and never scroll the page; each phase
   // fits/centers/squeezes its own content. Host is a wide shared display, the
   // player a narrower controller.
-  const shell = isHost
+  // Only the display host gets the wide shared-screen shell; a playing host uses
+  // the narrow controller shell like any other player.
+  const shell = bigScreen
     ? "mx-auto flex h-dvh w-full max-w-[1700px] flex-col gap-5 overflow-hidden px-6 py-5 sm:px-10"
-    : // narrow controller normally; when the window is short the canvas+tools go
-      // side-by-side, so widen it to give the canvas real room to grow.
-      "mx-auto flex h-dvh w-full max-w-xl flex-col gap-4 overflow-hidden px-5 py-5 short:max-w-5xl";
+    : // Narrow controller on phones/portrait tablets. On a wide desktop (lg+) it
+      // widens into a real two-pane workspace instead of a thin centred column,
+      // and short/landscape still gets the side-by-side canvas room.
+      "mx-auto flex h-dvh w-full max-w-xl flex-col gap-4 overflow-hidden px-5 py-5 short:max-w-5xl lg:max-w-6xl lg:gap-5 lg:px-8";
 
   return (
     <main className={`grain-above ${shell}`}>
@@ -109,8 +128,10 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
       />
       <section className="flex min-h-0 flex-1 flex-col">
         {/* phases below fill, centre, or scroll within this fixed area */}
-        {isHost ? (
+        {bigScreen ? (
           <HostStage name={name} actions={actions} />
+        ) : showPlayingHost ? (
+          <PlayingHostStage name={name} actions={actions} />
         ) : (
           <PlayerStage name={name} actions={actions} />
         )}
@@ -118,9 +139,9 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
 
       <ConfirmDialog
         open={confirming === "leave"}
-        title="Close the room?"
-        message="Leaving ends the game for everyone in the room."
-        confirmLabel="Leave & close"
+        title="Leave the room?"
+        message="The game keeps going for everyone else — another player takes over as host."
+        confirmLabel="Leave room"
         onConfirm={confirmAction}
         onCancel={() => setConfirming(null)}
       />

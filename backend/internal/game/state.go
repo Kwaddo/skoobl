@@ -87,27 +87,39 @@ type Config struct {
 // each subscriber a redacted projection built by viewFor, so secret round data
 // (prompts, the featured artist, other players' drawings mid-round) never leaks.
 type GameState struct {
-	Code        string   `json:"code"`
-	Phase       Phase    `json:"phase"`
-	Host        string   `json:"host"`
+	Code  string `json:"code"`
+	Phase Phase  `json:"phase"`
+	Host  string `json:"host"`
+	// HostPlays is the room mode chosen when the host creates it: false ⇒ the host
+	// is a non-playing shared screen (the "TV"); true ⇒ the host is also a player
+	// (draws, guesses, scores) and there is no separate display, so each player
+	// sees the drawing on their own device.
+	HostPlays   bool     `json:"hostPlays"`
 	Players     []Player `json:"players"`
 	Round       int      `json:"round"` // 1-based; 0 in the lobby
 	TotalRounds int      `json:"totalRounds"`
-	Language    Language `json:"language"`
-	DrawMs      int      `json:"drawMs"`
-	GuessMs     int      `json:"guessMs"`
-	PhaseEndsAt int64    `json:"phaseEndsAt"` // unix ms a timed phase ends; 0 if untimed
+	// A round guesses several drawings in a row (see guessesForPlayers): one
+	// drawing is featured, guessed, and revealed at a time. FeatureIndex is the
+	// 1-based position of the drawing on show; FeatureCount is how many this round
+	// has. Both are public so the UI can render "Drawing 2 of 3".
+	FeatureIndex int      `json:"featureIndex,omitempty"`
+	FeatureCount int      `json:"featureCount,omitempty"`
+	Language     Language `json:"language"`
+	DrawMs       int      `json:"drawMs"`
+	GuessMs      int      `json:"guessMs"`
+	PhaseEndsAt  int64    `json:"phaseEndsAt"` // unix ms a timed phase ends; 0 if untimed
 
 	// Authoritative round data — persisted (server-side) but redacted from views.
-	Categories   []string            `json:"categories,omitempty"`   // active prompt pool
-	Prompt       string              `json:"prompt,omitempty"`       // the universal word everyone draws this round
-	Drawings     map[string][]Stroke `json:"drawings,omitempty"`     // player → latest strokes this round (draft or locked)
-	Locked       map[string]bool     `json:"locked,omitempty"`       // player → locked in (gates early-advance)
-	Featured     string              `json:"featured,omitempty"`     // artist shown this round
-	FeaturedPast []string            `json:"featuredPast,omitempty"` // artists already featured
-	Guesses      map[string]string   `json:"guesses,omitempty"`      // guesser → guessed artist
-	GuessTimes   map[string]int64    `json:"guessTimes,omitempty"`   // guesser → unix-ms of their latest guess
-	LastDeltas   map[string]int      `json:"lastDeltas,omitempty"`   // player → points earned in the round just scored
+	Categories    []string            `json:"categories,omitempty"`    // active prompt pool
+	Prompt        string              `json:"prompt,omitempty"`        // the universal word everyone draws this round
+	Drawings      map[string][]Stroke `json:"drawings,omitempty"`      // player → latest strokes this round (draft or locked)
+	Locked        map[string]bool     `json:"locked,omitempty"`        // player → locked in (gates early-advance)
+	Featured      string              `json:"featured,omitempty"`      // artist shown right now
+	RoundFeatured []string            `json:"roundFeatured,omitempty"` // artists already featured THIS round (never repeat a drawing)
+	FeaturedPast  []string            `json:"featuredPast,omitempty"`  // artists already featured across the game (spreads coverage)
+	Guesses       map[string]string   `json:"guesses,omitempty"`       // guesser → guessed artist
+	GuessTimes    map[string]int64    `json:"guessTimes,omitempty"`    // guesser → unix-ms of their latest guess
+	LastDeltas    map[string]int      `json:"lastDeltas,omitempty"`    // player → points earned in the round just scored
 
 	// View-only fields, populated by viewFor. Never set on the authoritative
 	// state, so they marshal away (omitempty) in the persisted snapshot.
@@ -150,17 +162,20 @@ func (g *GameState) playerIndex(name string) int {
 // featured artist's identity stay hidden until reveal.
 func (g *GameState) viewFor(name string, present map[string]*presence) GameState {
 	v := GameState{
-		Code:        g.Code,
-		Phase:       g.Phase,
-		Host:        g.Host,
-		Round:       g.Round,
-		TotalRounds: g.TotalRounds,
-		Language:    g.Language,
-		DrawMs:      g.DrawMs,
-		GuessMs:     g.GuessMs,
-		PhaseEndsAt: g.PhaseEndsAt,
-		You:         name,
-		Closed:      g.Closed,
+		Code:         g.Code,
+		Phase:        g.Phase,
+		Host:         g.Host,
+		HostPlays:    g.HostPlays,
+		Round:        g.Round,
+		TotalRounds:  g.TotalRounds,
+		FeatureIndex: g.FeatureIndex,
+		FeatureCount: g.FeatureCount,
+		Language:     g.Language,
+		DrawMs:       g.DrawMs,
+		GuessMs:      g.GuessMs,
+		PhaseEndsAt:  g.PhaseEndsAt,
+		You:          name,
+		Closed:       g.Closed,
 	}
 
 	v.Players = make([]Player, len(g.Players))
@@ -208,6 +223,11 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 			for artist, strokes := range g.Drawings {
 				v.Gallery[artist] = append([]Stroke(nil), strokes...)
 			}
+			// Tell the host which artists have been revealed so far THIS round, so
+			// the gallery can show those names and keep the not-yet-guessed ones
+			// hidden (scribbled out) — otherwise the first reveal would spoil every
+			// remaining drawing in a multi-guess round.
+			v.RoundFeatured = append([]string(nil), g.RoundFeatured...)
 		}
 	}
 	return v

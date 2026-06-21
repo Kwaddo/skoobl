@@ -252,3 +252,75 @@ export const Sparkle = ({ className }: IconProps) => (
     <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
   </Svg>
 );
+
+// Scribble — a scrawled, redacted marker scribble used to cover (hide) an artist's
+// name on a drawing that hasn't been guessed yet. The path is generated from a
+// seed (the artist name) with a tiny seeded PRNG, so every hidden name gets its
+// own messy, irregular scrawl that's stable across renders but different per name.
+const scribbleHash = (s: string): number => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+};
+
+// mulberry32 — small deterministic PRNG; returns floats in [0,1) from a seed.
+const mulberry32 = (a: number) => () => {
+  a = (a + 0x6d2b79f5) | 0;
+  let t = Math.imul(a ^ (a >>> 15), 1 | a);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+// scribblePath walks left-to-right with random vertical swings, jittered curve
+// control points, and the occasional backtrack — a chaotic, hand-scribbled line.
+const scribblePath = (rnd: () => number): string => {
+  const W = 96;
+  const H = 20;
+  const pad = 4;
+  const steps = 9 + Math.floor(rnd() * 5);
+  let x = pad + rnd() * 5;
+  let y = pad + rnd() * (H - 2 * pad);
+  let d = `M${x.toFixed(1)} ${y.toFixed(1)}`;
+  for (let i = 0; i < steps; i++) {
+    const forward = ((W - 2 * pad) / steps) * (0.55 + rnd() * 1.2);
+    const back = rnd() < 0.22 ? rnd() * 11 : 0; // sometimes scrawl backwards
+    const nx = Math.max(pad, Math.min(W - pad, x + forward - back));
+    const ny = pad + rnd() * (H - 2 * pad);
+    const cx = (x + nx) / 2 + (rnd() - 0.5) * 18;
+    const cy = (y + ny) / 2 + (rnd() - 0.5) * 20;
+    d += ` Q${cx.toFixed(1)} ${cy.toFixed(1)} ${nx.toFixed(1)} ${ny.toFixed(1)}`;
+    x = nx;
+    y = ny;
+  }
+  return d;
+};
+
+export function Scribble({
+  className,
+  seed = "",
+}: {
+  className?: string;
+  seed?: string;
+}) {
+  const rnd = mulberry32(scribbleHash(seed));
+  const a = scribblePath(rnd);
+  const b = scribblePath(rnd); // second pass over the same stream → different scrawl
+  return (
+    <svg
+      viewBox="0 0 96 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d={a} />
+      <path d={b} opacity="0.5" />
+    </svg>
+  );
+}
