@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Segmented } from "@/components/Segmented";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { getSaveGalleryPref, setSaveGalleryPref } from "@/lib/history";
+import type { GameMode } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 
 const DRAW_TIME_OPTIONS = [30, 60, 80, 120];
@@ -36,6 +37,9 @@ export function HostConfig({ actions }: { actions: GameActions }) {
   const [guessSec, setGuessSec] = useState(() =>
     Math.round(useGameStore.getState().guessMs / 1000),
   );
+  const [gameMode, setGameMode] = useState<GameMode>(
+    () => useGameStore.getState().mode,
+  );
   const [mode, setMode] = useState<CategoryMode>("random");
   const [categories, setCategories] = useState("");
   // Device-local pref (not a game setting): also archive every player's drawing
@@ -49,6 +53,7 @@ export function HostConfig({ actions }: { actions: GameActions }) {
         language: typeof language;
         drawSec: number;
         guessSec: number;
+        gameMode: GameMode;
         mode: CategoryMode;
         categories: string;
       }>,
@@ -58,6 +63,7 @@ export function HostConfig({ actions }: { actions: GameActions }) {
         language,
         drawSec,
         guessSec,
+        gameMode,
         mode,
         categories,
         ...over,
@@ -67,11 +73,12 @@ export function HostConfig({ actions }: { actions: GameActions }) {
         language: next.language,
         drawMs: next.drawSec * 1000,
         guessMs: next.guessSec * 1000,
+        mode: next.gameMode,
         categories:
           next.mode === "custom" ? parseCategories(next.categories) : [],
       });
     },
-    [actions, rounds, language, drawSec, guessSec, mode, categories],
+    [actions, rounds, language, drawSec, guessSec, gameMode, mode, categories],
   );
 
   return (
@@ -79,6 +86,20 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <h3 className="ink-underline w-fit shrink-0 font-display text-lg font-black">
         Game settings
       </h3>
+
+      <Row label="Mode">
+        <Segmented
+          value={gameMode}
+          options={[
+            { value: "classic" as const, label: "Classic" },
+            { value: "flipped" as const, label: "Whose Doodle" },
+          ]}
+          onChange={(v) => {
+            setGameMode(v);
+            sync({ gameMode: v });
+          }}
+        />
+      </Row>
 
       <Row label="Rounds">
         <Stepper

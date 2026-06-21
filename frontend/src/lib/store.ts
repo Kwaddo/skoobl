@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { syncClock } from "./clock";
 import type {
+  GameMode,
   GameState,
   Language,
   Phase,
@@ -29,6 +30,7 @@ interface GameStore {
   phase: Phase;
   host: string;
   hostPlays: boolean;
+  mode: GameMode;
   players: Player[];
   round: number;
   totalRounds: number;
@@ -75,6 +77,7 @@ const initial = {
   phase: "lobby" as Phase,
   host: "",
   hostPlays: false,
+  mode: "classic" as GameMode,
   players: [] as Player[],
   round: 0,
   totalRounds: 3,
@@ -139,6 +142,7 @@ export const useGameStore = create<GameStore>((set) => ({
         phase: s.phase,
         host: s.host,
         hostPlays: s.hostPlays ?? false,
+        mode: s.mode ?? "classic",
         players: s.players ?? [],
         round: s.round ?? 0,
         totalRounds: s.totalRounds ?? initial.totalRounds,

@@ -14,6 +14,9 @@ export type Phase = "lobby" | "drawing" | "guessing" | "reveal" | "ended";
 // all other UI text stays English.
 export type Language = "en" | "ar";
 
+// Round variant. Classic is the current game; flipped is "Whose Doodle".
+export type GameMode = "classic" | "flipped" | "frenzy";
+
 export interface Point {
   x: number;
   y: number;
@@ -47,6 +50,7 @@ export interface GameState {
   code: string;
   phase: Phase;
   host: string;
+  mode?: GameMode;
   // true ⇒ the host is also a player (no separate display screen); false ⇒ the
   // host is the non-playing big screen.
   hostPlays?: boolean;
@@ -91,6 +95,7 @@ export interface GameConfig {
   categories: string[];
   drawMs: number;
   guessMs: number;
+  mode: GameMode;
 }
 
 export interface ServerError {
