@@ -7,6 +7,7 @@ import type { Stroke } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 import { DrawingCanvas } from "../canvas/DrawingCanvas";
 import { StrokesView } from "../canvas/StrokesView";
+import { EffectLayer } from "../display/EffectLayer";
 import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
 import { FlippedGuessing } from "../display/FlippedGuessing";
@@ -199,8 +200,9 @@ export function PlayerGuessing({
   const pool = useGameStore((s) => s.pool);
   const youAreTarget = useGameStore((s) => s.youAreTarget);
   const me = players.find((p) => p.name === name);
+  const effects = useActiveEffects();
 
-  if (mode === "flipped") {
+  if (pool.length > 0) {
     return (
       <FlippedGuessing
         target={target}
@@ -212,6 +214,8 @@ export function PlayerGuessing({
         featureIndex={featureIndex}
         featureCount={featureCount}
         onPick={(id) => actions.submitDoodleGuess(id)}
+        effects={effects}
+        tray={mode === "frenzy" ? <PowerupTray actions={actions} /> : null}
       />
     );
   }
@@ -223,6 +227,9 @@ export function PlayerGuessing({
   const options = players.filter(
     (p) => p.name !== name && p.hasDrawn && !revealed.includes(p.name),
   );
+  const shownOptions = effects.has("shuffle")
+    ? [...options].reverse()
+    : options;
   // Play-along rooms show the drawing inline, so desktop gets a two-pane split
   // (drawing beside the guess list); otherwise it's a single centred column.
   const showDrawing = hostPlays && !youAreArtist;
@@ -255,12 +262,13 @@ export function PlayerGuessing({
           it becomes the two-pane row holding the drawing and the guess list */}
       <div className="contents lg:flex lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:gap-6">
         {showDrawing && (
-          <div
+          <EffectLayer
             key={`drawing-${featureIndex}`}
+            effects={effects}
             className="tape reveal-clip mt-2 aspect-4/3 max-h-[42vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] lg:mt-0 lg:aspect-auto lg:h-full lg:w-3/5 lg:shrink-0"
           >
             <StrokesView strokes={drawing} className="h-full w-full" />
-          </div>
+          </EffectLayer>
         )}
 
         {youAreArtist ? (
@@ -287,7 +295,7 @@ export function PlayerGuessing({
               showDrawing ? "lg:grid-cols-2" : "lg:grid-cols-4"
             }`}
           >
-            {options.map((p, i) => (
+            {shownOptions.map((p, i) => (
               <li key={p.name}>
                 <button
                   type="button"
