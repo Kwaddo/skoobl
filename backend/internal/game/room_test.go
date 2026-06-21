@@ -1716,3 +1716,69 @@ func TestEmptyLockInIsNotADrawing(t *testing.T) {
 		t.Fatalf("bob delta = %d, want 0 (an empty lock-in must not score)", got)
 	}
 }
+
+func TestFlippedCorrectGuessScores(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	target := r.state.Featured
+	targetID := r.state.DrawIDs[target]
+
+	for _, n := range names {
+		if n == target {
+			continue
+		}
+		r.handle(Command{Kind: CmdSubmitGuess, Player: n, GuessID: targetID})
+	}
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal once all non-targets matched", r.state.Phase)
+	}
+	for _, p := range r.state.Players {
+		if p.Name == target {
+			continue
+		}
+		if p.Score <= 0 {
+			t.Fatalf("%s scored %d, want > 0 for a correct flipped match", p.Name, p.Score)
+		}
+	}
+}
+
+func TestFlippedWrongAndUnknownId(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	target := r.state.Featured
+
+	// A wrong (but valid) id: some non-target drawer's doodle.
+	wrongOwner := ""
+	for _, n := range names {
+		if n != target {
+			wrongOwner = n
+			break
+		}
+	}
+	wrongID := r.state.DrawIDs[wrongOwner]
+
+	// An unknown id is ignored entirely (no guess recorded).
+	r.handle(Command{Kind: CmdSubmitGuess, Player: pickGuesser(names, target), GuessID: "dffffffff"})
+	if _, ok := r.state.Guesses[pickGuesser(names, target)]; ok {
+		t.Fatal("an unknown id must not record a guess")
+	}
+
+	guesser := pickGuesser(names, target)
+	r.handle(Command{Kind: CmdSubmitGuess, Player: guesser, GuessID: wrongID})
+	if _, ok := r.state.Guesses[guesser]; !ok {
+		t.Fatal("a valid wrong id should record a (wrong) guess")
+	}
+	if r.state.Guesses[guesser] == target {
+		t.Fatal("a wrong id must not resolve to the target")
+	}
+}
+
+// pickGuesser returns the first name that is not the target.
+func pickGuesser(names []string, target string) string {
+	for _, n := range names {
+		if n != target {
+			return n
+		}
+	}
+	return ""
+}

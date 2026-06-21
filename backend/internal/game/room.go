@@ -121,6 +121,7 @@ type Command struct {
 	// Game payloads.
 	Strokes []Stroke // submitDrawing
 	Guess   string   // submitGuess: the guessed artist's name
+	GuessID string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
 	Config  *Config  // configure
 }
 

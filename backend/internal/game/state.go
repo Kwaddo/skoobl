@@ -224,6 +224,21 @@ func (g *GameState) playerIndex(name string) int {
 	return -1
 }
 
+// ownerOfDrawID returns the drawer whose flipped per-round id matches, or "" if
+// none (unknown or stale id). Used to resolve a flipped guess (a drawing id) back
+// to the player name the classic scoring path expects.
+func (g *GameState) ownerOfDrawID(id string) string {
+	if id == "" {
+		return ""
+	}
+	for name, did := range g.DrawIDs {
+		if did == id {
+			return name
+		}
+	}
+	return ""
+}
+
 // viewFor builds the redacted projection sent to a single recipient. It is an
 // explicit allowlist: only public state, plus the recipient's own private data
 // for the current phase, is copied. Everyone else's prompts/drawings and the

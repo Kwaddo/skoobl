@@ -39,7 +39,16 @@ func (r *Room) submitGuess(c Command) {
 	if r.state.Phase != PhaseGuessing {
 		return
 	}
-	if c.Player == r.state.Featured { // the artist doesn't guess their own drawing
+	if r.state.Mode == ModeFlipped {
+		// In flipped the client picks a drawing id; resolve it to the owner so the
+		// classic scoring path (Guesses[guesser] == Featured) works unchanged.
+		owner := r.state.ownerOfDrawID(c.GuessID)
+		if owner == "" {
+			return // unknown or stale id
+		}
+		c.Guess = owner
+	}
+	if c.Player == r.state.Featured { // the target doesn't guess their own drawing
 		return
 	}
 	if r.state.playerIndex(c.Player) < 0 || r.state.playerIndex(c.Guess) < 0 {
