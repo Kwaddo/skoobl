@@ -90,6 +90,13 @@ type Reveal struct {
 	Prompt string `json:"prompt"` // the word they were asked to draw
 }
 
+// PoolDrawing is one anonymized candidate in flipped guessing: a stable per-round
+// opaque id and the strokes, with no owner name attached.
+type PoolDrawing struct {
+	ID      string   `json:"id"`
+	Strokes []Stroke `json:"strokes"`
+}
+
 // Config is the host-tunable game setup, applied in the lobby.
 type Config struct {
 	Rounds     int      `json:"rounds"`
@@ -139,6 +146,7 @@ type GameState struct {
 	Guesses       map[string]string   `json:"guesses,omitempty"`       // guesser → guessed artist
 	GuessTimes    map[string]int64    `json:"guessTimes,omitempty"`    // guesser → unix-ms of their latest guess
 	LastDeltas    map[string]int      `json:"lastDeltas,omitempty"`    // player → points earned in the round just scored
+	DrawIDs       map[string]string   `json:"drawIds,omitempty"`       // flipped: per-round opaque id per drawer (name→id); server-only, redacted by viewFor
 
 	// View-only fields, populated by viewFor. Never set on the authoritative
 	// state, so they marshal away (omitempty) in the persisted snapshot.
@@ -149,6 +157,9 @@ type GameState struct {
 	YouAreArtist   bool                `json:"youAreArtist,omitempty"`
 	YourGuess      string              `json:"yourGuess,omitempty"`
 	Reveal         *Reveal             `json:"reveal,omitempty"`
+	Target         string              `json:"target,omitempty"`       // flipped guessing: whose doodle to find
+	YouAreTarget   bool                `json:"youAreTarget,omitempty"` // flipped guessing: you're the target, sit out
+	Pool           []PoolDrawing       `json:"pool,omitempty"`         // flipped guessing: anonymized candidate doodles
 	// Revealed lists this round's already-revealed artists (excluding the drawing
 	// on show, still secret). Sent to guessers so the UI drops them from the "who
 	// drew it?" options — each player draws once, so a revealed artist can't be
@@ -183,6 +194,25 @@ func (g *GameState) revealedExcept(current string) []string {
 		}
 	}
 	return out
+}
+
+// flippedPool builds the anonymized candidate list for flipped guessing: every
+// drawer whose doodle is still in play this round (not an already-revealed
+// target), keyed by opaque id, in stable roster order. The current target's
+// doodle is included but unlabeled — that's the one to find.
+func (g *GameState) flippedPool() []PoolDrawing {
+	revealed := map[string]bool{}
+	for _, n := range g.revealedExcept(g.Featured) {
+		revealed[n] = true
+	}
+	var pool []PoolDrawing
+	for _, p := range g.Players {
+		if len(g.Drawings[p.Name]) == 0 || revealed[p.Name] {
+			continue
+		}
+		pool = append(pool, PoolDrawing{ID: g.DrawIDs[p.Name], Strokes: g.Drawings[p.Name]})
+	}
+	return pool
 }
 
 func (g *GameState) playerIndex(name string) int {
@@ -250,12 +280,21 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 	case PhaseDrawing:
 		v.YourPrompt = g.Prompt // everyone draws the same universal word
 	case PhaseGuessing:
-		v.CurrentDrawing = g.Drawings[g.Featured] // artist identity stays hidden
-		v.YouAreArtist = name == g.Featured
-		v.YourGuess = g.Guesses[name]
-		// Drop earlier-revealed artists from the guess options. The drawing on show
-		// (g.Featured) is excluded so it never leaks before its own reveal.
-		v.Revealed = g.revealedExcept(g.Featured)
+		if g.Mode == ModeFlipped {
+			v.Target = g.Featured
+			v.YouAreTarget = name == g.Featured
+			v.Pool = g.flippedPool()
+			// YourGuess is intentionally omitted in flipped: it holds the resolved
+			// owner name, which would reveal the answer. The UI uses HasDrawn /
+			// the player's HasGuessed flag instead.
+		} else {
+			v.CurrentDrawing = g.Drawings[g.Featured] // artist identity stays hidden
+			v.YouAreArtist = name == g.Featured
+			v.YourGuess = g.Guesses[name]
+			// Drop earlier-revealed artists from the guess options. The drawing on
+			// show (g.Featured) is excluded so it never leaks before its own reveal.
+			v.Revealed = g.revealedExcept(g.Featured)
+		}
 	case PhaseReveal:
 		v.CurrentDrawing = g.Drawings[g.Featured]
 		v.YourGuess = g.Guesses[name]
