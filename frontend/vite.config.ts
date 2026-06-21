@@ -40,5 +40,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Node 26 adds experimental localStorage/sessionStorage to globalThis, which
+    // prevents vitest's populateGlobal from overriding them with jsdom's working
+    // implementations. The setup file re-binds them from window explicitly.
+    setupFiles: ["./src/test-setup.ts"],
   },
 });

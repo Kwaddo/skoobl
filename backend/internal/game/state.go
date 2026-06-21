@@ -130,6 +130,11 @@ type GameState struct {
 	YouAreArtist   bool                `json:"youAreArtist,omitempty"`
 	YourGuess      string              `json:"yourGuess,omitempty"`
 	Reveal         *Reveal             `json:"reveal,omitempty"`
+	// Revealed lists this round's already-revealed artists (excluding the drawing
+	// on show, still secret). Sent to guessers so the UI drops them from the "who
+	// drew it?" options — each player draws once, so a revealed artist can't be
+	// the answer to a later drawing in the same round.
+	Revealed []string `json:"revealed,omitempty"`
 	// Closed is the final frame the room sends when the host leaves: the room is
 	// gone and clients should kick everyone back to the main menu.
 	Closed bool `json:"closed,omitempty"`
@@ -145,6 +150,19 @@ func newGameState(code string) GameState {
 		DrawMs:      DefaultDrawMs,
 		GuessMs:     DefaultGuessMs,
 	}
+}
+
+// revealedExcept returns the artists featured so far this round minus `current`,
+// i.e. the ones whose drawing has already been revealed. Names are unique, so
+// filtering by value drops exactly the in-flight (still-secret) artist.
+func (g *GameState) revealedExcept(current string) []string {
+	var out []string
+	for _, n := range g.RoundFeatured {
+		if n != current {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func (g *GameState) playerIndex(name string) int {
@@ -214,6 +232,9 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		v.CurrentDrawing = g.Drawings[g.Featured] // artist identity stays hidden
 		v.YouAreArtist = name == g.Featured
 		v.YourGuess = g.Guesses[name]
+		// Drop earlier-revealed artists from the guess options. The drawing on show
+		// (g.Featured) is excluded so it never leaks before its own reveal.
+		v.Revealed = g.revealedExcept(g.Featured)
 	case PhaseReveal:
 		v.CurrentDrawing = g.Drawings[g.Featured]
 		v.YourGuess = g.Guesses[name]

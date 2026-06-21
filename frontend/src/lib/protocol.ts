@@ -74,6 +74,9 @@ export interface GameState {
   youAreArtist?: boolean;
   yourGuess?: string;
   reveal?: Reveal | null;
+  // Guessing phase: artists already revealed earlier this round. Each player draws
+  // once, so these can't be the current drawing's artist — dropped from the options.
+  revealed?: string[];
   // Reveal phase, host only: artists already revealed this round, so the gallery
   // shows their names and keeps the not-yet-guessed drawings' names hidden.
   roundFeatured?: string[];

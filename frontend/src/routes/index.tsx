@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { HistoryTab } from "@/components/history/HistoryTab";
 import { Segmented } from "@/components/Segmented";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-type Tab = "join" | "host";
+type Tab = "join" | "host" | "history";
 
 // Marquee phrase (with a trailing separator so the repeated copies chain cleanly).
 const TICKER = "draw • guess • laugh • win • ";
@@ -151,18 +152,24 @@ function Home() {
           className="ink-block crop-marks rise flex flex-col gap-6 p-6 sm:p-8"
           style={{ "--d": "90ms" } as React.CSSProperties}
         >
-          {/* tabs — hosting needs a big screen, so phones only get to join */}
-          {!isMobile && (
-            <Segmented
-              value={tab}
-              onChange={(v) => switchTab(v)}
-              options={[
-                { value: "join", label: "Join a room" },
-                { value: "host", label: "Host a game" },
-              ]}
-              itemClassName="flex-1 px-4 py-2.5 text-sm font-bold"
-            />
-          )}
+          {/* tabs — hosting needs a big screen, so phones only get Join + History */}
+          <Segmented
+            value={tab}
+            onChange={(v) => switchTab(v)}
+            options={
+              isMobile
+                ? [
+                    { value: "join" as const, label: "Join" },
+                    { value: "history" as const, label: "History" },
+                  ]
+                : [
+                    { value: "join" as const, label: "Join a room" },
+                    { value: "host" as const, label: "Host a game" },
+                    { value: "history" as const, label: "History" },
+                  ]
+            }
+            itemClassName="flex-1 px-4 py-2.5 text-sm font-bold"
+          />
 
           {/* swapped per tab — keyed so it crossfades in on each switch. Join asks
             for a name + code; hosting needs neither (the host is the screen). */}
@@ -170,7 +177,9 @@ function Home() {
             key={tab}
             className="rise flex min-h-44 flex-col justify-center gap-6"
           >
-            {tab === "join" ? (
+            {tab === "history" ? (
+              <HistoryTab />
+            ) : tab === "join" ? (
               <>
                 <label className="flex flex-col gap-2">
                   <span className="font-mono text-xs uppercase tracking-widest text-muted">
@@ -252,22 +261,24 @@ function Home() {
             )}
           </div>
 
-          <button
-            type="button"
-            className="btn-key w-full px-6 py-4 text-lg"
-            onClick={tab === "host" ? host : join}
-            disabled={busy}
-          >
-            {tab === "host"
-              ? busy
-                ? "Creating room…"
-                : hostMode === "play"
-                  ? "Host & play"
-                  : "Host a game"
-              : busy
-                ? "Joining…"
-                : "Join room"}
-          </button>
+          {tab !== "history" && (
+            <button
+              type="button"
+              className="btn-key w-full px-6 py-4 text-lg"
+              onClick={tab === "host" ? host : join}
+              disabled={busy}
+            >
+              {tab === "host"
+                ? busy
+                  ? "Creating room…"
+                  : hostMode === "play"
+                    ? "Host & play"
+                    : "Host a game"
+                : busy
+                  ? "Joining…"
+                  : "Join room"}
+            </button>
+          )}
 
           {error && (
             <p className="rise flex items-center justify-center gap-2 rounded-xl border-2 border-foreground bg-surface-2 px-4 py-3 text-center text-sm font-bold text-foreground">
