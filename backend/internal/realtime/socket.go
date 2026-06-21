@@ -69,7 +69,11 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 	sock.On("submitDrawing", func(args ...any) { c.submitDrawing(args) })
 	sock.On("draftDrawing", func(args ...any) { c.draftDrawing(args) })
 	sock.On("submitGuess", func(args ...any) {
-		c.submit(game.Command{Kind: game.CmdSubmitGuess, Guess: strings.TrimSpace(stringField(args, "artist"))})
+		c.submit(game.Command{
+			Kind:    game.CmdSubmitGuess,
+			Guess:   strings.TrimSpace(stringField(args, "artist")),
+			GuessID: strings.TrimSpace(stringField(args, "id")),
+		})
 	})
 	sock.On("leave", func(...any) { c.leaveRoom() })
 	sock.On("disconnect", func(...any) { c.onDisconnect() })
