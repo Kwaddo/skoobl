@@ -1,5 +1,7 @@
 package game
 
+import "time"
+
 // Phase is the room's lifecycle stage.
 //
 // Flow: lobby → drawing → guessing → reveal → (next round) drawing … → ended.
@@ -41,14 +43,19 @@ type Mode string
 const (
 	ModeClassic Mode = "classic" // current behavior; the default
 	ModeFlipped Mode = "flipped" // Whose Doodle: pick which drawing is the target's
+	ModeFrenzy  Mode = "frenzy"  // powerup free-for-all over the classic loop
 )
 
 // sanitizeMode coerces an untrusted mode to a known value, defaulting to classic.
 func sanitizeMode(m Mode) Mode {
-	if m == ModeFlipped {
+	switch m {
+	case ModeFlipped:
 		return ModeFlipped
+	case ModeFrenzy:
+		return ModeFrenzy
+	default:
+		return ModeClassic
 	}
-	return ModeClassic
 }
 
 // Point is a single coordinate in the fixed logical canvas space (see Canvas*
@@ -88,6 +95,15 @@ type Player struct {
 type Reveal struct {
 	Artist string `json:"artist"` // who drew the featured drawing
 	Prompt string `json:"prompt"` // the word they were asked to draw
+}
+
+// ActiveEffect is a Frenzy effect currently inflicted on a victim: which
+// powerup, when it expires (unix ms, absolute), and who fired it (for the
+// victim's toast). Stored per-victim, redacted to that victim only.
+type ActiveEffect struct {
+	Kind   Powerup `json:"kind"`
+	EndsAt int64   `json:"endsAt"`
+	From   string  `json:"from"`
 }
 
 // PoolDrawing is one anonymized candidate in flipped guessing: a stable per-round
@@ -136,17 +152,19 @@ type GameState struct {
 	PhaseEndsAt  int64    `json:"phaseEndsAt"` // unix ms a timed phase ends; 0 if untimed
 
 	// Authoritative round data — persisted (server-side) but redacted from views.
-	Categories    []string            `json:"categories,omitempty"`    // active prompt pool
-	Prompt        string              `json:"prompt,omitempty"`        // the universal word everyone draws this round
-	Drawings      map[string][]Stroke `json:"drawings,omitempty"`      // player → latest strokes this round (draft or locked)
-	Locked        map[string]bool     `json:"locked,omitempty"`        // player → locked in (gates early-advance)
-	Featured      string              `json:"featured,omitempty"`      // artist shown right now
-	RoundFeatured []string            `json:"roundFeatured,omitempty"` // artists already featured THIS round (never repeat a drawing)
-	FeaturedPast  []string            `json:"featuredPast,omitempty"`  // artists already featured across the game (spreads coverage)
-	Guesses       map[string]string   `json:"guesses,omitempty"`       // guesser → guessed artist
-	GuessTimes    map[string]int64    `json:"guessTimes,omitempty"`    // guesser → unix-ms of their latest guess
-	LastDeltas    map[string]int      `json:"lastDeltas,omitempty"`    // player → points earned in the round just scored
-	DrawIDs       map[string]string   `json:"drawIds,omitempty"`       // flipped: per-round opaque id per drawer (name→id); server-only, redacted by viewFor
+	Categories    []string                  `json:"categories,omitempty"`    // active prompt pool
+	Prompt        string                    `json:"prompt,omitempty"`        // the universal word everyone draws this round
+	Drawings      map[string][]Stroke       `json:"drawings,omitempty"`      // player → latest strokes this round (draft or locked)
+	Locked        map[string]bool           `json:"locked,omitempty"`        // player → locked in (gates early-advance)
+	Featured      string                    `json:"featured,omitempty"`      // artist shown right now
+	RoundFeatured []string                  `json:"roundFeatured,omitempty"` // artists already featured THIS round (never repeat a drawing)
+	FeaturedPast  []string                  `json:"featuredPast,omitempty"`  // artists already featured across the game (spreads coverage)
+	Guesses       map[string]string         `json:"guesses,omitempty"`       // guesser → guessed artist
+	GuessTimes    map[string]int64          `json:"guessTimes,omitempty"`    // guesser → unix-ms of their latest guess
+	LastDeltas    map[string]int            `json:"lastDeltas,omitempty"`    // player → points earned in the round just scored
+	DrawIDs       map[string]string         `json:"drawIds,omitempty"`       // flipped: per-round opaque id per drawer (name→id); server-only, redacted by viewFor
+	Inventory     map[string][]Powerup      `json:"inventory,omitempty"`     // frenzy: player → held powerups; server-only
+	Effects       map[string][]ActiveEffect `json:"effects,omitempty"`       // frenzy: victim → active effects; server-only
 
 	// View-only fields, populated by viewFor. Never set on the authoritative
 	// state, so they marshal away (omitempty) in the persisted snapshot.
@@ -164,7 +182,9 @@ type GameState struct {
 	// on show, still secret). Sent to guessers so the UI drops them from the "who
 	// drew it?" options — each player draws once, so a revealed artist can't be
 	// the answer to a later drawing in the same round.
-	Revealed []string `json:"revealed,omitempty"`
+	Revealed     []string       `json:"revealed,omitempty"`
+	YourPowerups []Powerup      `json:"yourPowerups,omitempty"` // frenzy: this recipient's held powerups
+	YourEffects  []ActiveEffect `json:"yourEffects,omitempty"`  // frenzy: this recipient's active effects
 	// Closed is the final frame the room sends when the host leaves: the room is
 	// gone and clients should kick everyone back to the main menu.
 	Closed bool `json:"closed,omitempty"`
@@ -324,6 +344,15 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 			// hidden (scribbled out) — otherwise the first reveal would spoil every
 			// remaining drawing in a multi-guess round.
 			v.RoundFeatured = append([]string(nil), g.RoundFeatured...)
+		}
+	}
+	if g.Mode == ModeFrenzy {
+		now := time.Now().UnixMilli()
+		if held := g.Inventory[name]; len(held) > 0 {
+			v.YourPowerups = append([]Powerup(nil), held...)
+		}
+		if live := activeEffects(g.Effects[name], now); len(live) > 0 {
+			v.YourEffects = live
 		}
 	}
 	return v
