@@ -239,8 +239,14 @@ describe("stage split", () => {
       youAreTarget: false,
       players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
       pool: [
-        { id: "d1", strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }] },
-        { id: "d2", strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }] },
+        {
+          id: "d1",
+          strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+        },
+        {
+          id: "d2",
+          strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
+        },
       ],
     });
     const { container, getByText, queryByText } = render(
@@ -252,6 +258,30 @@ describe("stage split", () => {
     expect(getByText(/bob/i)).toBeTruthy();
     // Not the classic "who drew it?" name list.
     expect(queryByText(/who drew it/i)).toBeNull();
+  });
+
+  it("host flipped guessing shows the doodle grid and names the target", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "flipped",
+      target: "bob",
+      players: [{ name: "ann" }, { name: "bob" }],
+      pool: [
+        {
+          id: "d1",
+          strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+        },
+        {
+          id: "d2",
+          strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
+        },
+      ],
+    });
+    const { container, getByText } = render(
+      <HostStage name="tv" actions={noopActions} />,
+    );
+    expect(container.querySelectorAll("canvas").length).toBe(2);
+    expect(getByText(/bob/i)).toBeTruthy();
   });
 
   it("player ended shows their drawings with downloads, not the scoreboard", () => {

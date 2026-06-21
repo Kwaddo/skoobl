@@ -8,6 +8,7 @@ import { CodeCard } from "../display/CodeCard";
 import { DrawingCarousel } from "../display/DrawingCarousel";
 import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
+import { FlippedGuessing } from "../display/FlippedGuessing";
 import { HOST_CANVAS, HOST_CANVAS_BOX } from "../display/host-canvas";
 import { Panel } from "../display/Panel";
 import { PlayerGrid, Roster } from "../display/PlayerList";
@@ -217,6 +218,23 @@ function HostGuessing() {
   const featureIndex = useGameStore((s) => s.featureIndex);
   const featureCount = useGameStore((s) => s.featureCount);
   const remaining = useCountdown(endsAt);
+  const mode = useGameStore((s) => s.mode);
+  const target = useGameStore((s) => s.target);
+  const pool = useGameStore((s) => s.pool);
+
+  if (mode === "flipped") {
+    return (
+      <FlippedGuessing
+        target={target}
+        pool={pool}
+        remaining={remaining}
+        guessMs={guessMs}
+        featureIndex={featureIndex}
+        featureCount={featureCount}
+      />
+    );
+  }
+
   const guessed = players.filter((p) => p.hasGuessed).length;
   // The artist is excluded from guessing, so exactly one player never guesses.
   // Count against the non-artist total so the tally tops out cleanly and never
