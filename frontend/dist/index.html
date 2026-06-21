@@ -90,7 +90,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Caveat:wght@600;700&display=swap"
       rel="stylesheet"
     />
 
@@ -125,19 +125,28 @@
         line-height: 1.6;
         color: #c9c9cf;
       }
+      /* Loading background — matches the chosen theme (set before paint by the
+         script above) so there's no colour flash before React + index.css load. */
       body {
         margin: 0;
-        background: #08080a;
+        background: #0d0d10;
+      }
+      html[data-theme="light"] body {
+        background: #efeadd;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-URMIRUbu.js"></script>
+    <script type="module" crossorigin src="/assets/index-sGqmmWz1.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/theme-C31hdB3V.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-B_vMhAdo.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-BIFE_itS.css">
   </head>
   <body>
-    <div id="root">
-      <!-- Pre-render / no-JS landing content. Real indexable text for search
-           engines and AI answer engines. React replaces this on mount. -->
+    <div id="root"></div>
+    <!-- No-JS fallback + indexable text. Wrapped in <noscript> so it is ONLY
+         shown when scripting is disabled — it is never painted for normal (JS)
+         visitors, so there's no flash on load — while staying in the raw HTML for
+         search engines and AI fetchers that don't execute JS. React renders the
+         real app into #root above. -->
+    <noscript>
       <main class="seo-landing">
         <h1>skoobl — online multiplayer draw &amp; guess game</h1>
         <p>
@@ -165,11 +174,8 @@
           <li>Free to play, no account or download required</li>
         </ul>
 
-        <p>
-          Loading the game… if it does not start, enable JavaScript in your
-          browser.
-        </p>
+        <p>This game needs JavaScript — please enable it in your browser to play.</p>
       </main>
-    </div>
+    </noscript>
   </body>
 </html>

@@ -227,19 +227,13 @@ func TestReturnToLobbyResetsAndAllowsRestart(t *testing.T) {
 			{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
 		}})
 	}
-	artist := ""
-	for _, n := range names {
-		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
-			artist = n
-		}
+	// 4 players → the round guesses through guessesForPlayers(4)=2 drawings, each
+	// with its own guessing + reveal; the host clicks through both before the
+	// (single, last) round ends.
+	for f := 0; f < guessesForPlayers(len(names)); f++ {
+		guessFeatureToReveal(t, r, chans, names)
+		r.Submit(Command{Kind: CmdNextPhase, Player: "tv"})
 	}
-	for _, n := range names {
-		if n != artist {
-			r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: artist})
-		}
-	}
-	awaitPhase(t, chans["alice"], PhaseReveal)
-	r.Submit(Command{Kind: CmdNextPhase, Player: "tv"}) // last round → ended
 	awaitPhase(t, chans["alice"], PhaseEnded)
 
 	// A non-host cannot send everyone back to the lobby.
@@ -333,8 +327,8 @@ func TestBriefDisconnectDoesNotBounce(t *testing.T) {
 	}
 }
 
-func TestHostLeaveClosesRoomForPlayers(t *testing.T) {
-	r := NewRoom("hostclose", WithGrace(time.Hour))
+func TestHostLeaveHandsOffToPlayer(t *testing.T) {
+	r := NewRoom("handoff", WithGrace(time.Hour))
 	go r.Run()
 	defer r.Stop()
 
@@ -344,20 +338,50 @@ func TestHostLeaveClosesRoomForPlayers(t *testing.T) {
 	joinOK(t, r, "alice", playerSub)
 	drain(playerSub)
 
-	// The host leaving closes the whole room; the remaining player must get a
-	// final frame flagged Closed so the client can kick them to the main menu.
+	// The display host leaving hands the room to the remaining player rather than
+	// closing it: alice becomes the (playing) host and the room stays open.
 	r.Submit(Command{Kind: CmdLeave, Player: "tv", Unsub: hostSub})
 
-	deadline := time.After(time.Second)
+	s := awaitHostIs(t, playerSub, "alice")
+	if !s.HostPlays {
+		t.Fatal("HostPlays = false after hand-off, want true (new host is a player)")
+	}
+	if s.Closed {
+		t.Fatal("room closed after hand-off, want it to stay open")
+	}
+}
+
+// awaitHostIs reads forward until it sees a broadcast whose Host is `want`.
+func awaitHostIs(t *testing.T, ch chan GameState, want string) GameState {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
 	for {
 		select {
-		case s := <-playerSub:
-			if s.Closed {
-				return
+		case s := <-ch:
+			if s.Host == want {
+				return s
 			}
 		case <-deadline:
-			t.Fatal("player never received a Closed frame after the host left")
+			t.Fatalf("host never became %q", want)
+			return GameState{}
 		}
+	}
+}
+
+func TestHostLeaveClosesWhenAlone(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("alone", WithGrace(time.Hour),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinSpec(t, r, "tv", sub) // host only, nobody to hand off to
+	r.Submit(Command{Kind: CmdLeave, Player: "tv", Unsub: sub})
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped when the lone host left (nobody to take over)")
 	}
 }
 
@@ -544,6 +568,141 @@ func TestNilSnapshotterDoesNotPanic(t *testing.T) {
 	nextState(t, sub) // would panic on persist if nil not guarded
 }
 
+// joinPlaying submits a playing-host join (the host is also a player) and asserts
+// the room accepts it (empty ack).
+func joinPlaying(t *testing.T, r *Room, name string, sub chan GameState) {
+	t.Helper()
+	ack := make(chan string, 1)
+	r.Submit(Command{Kind: CmdJoin, Player: name, AsHost: true, Subscribe: sub, Ack: ack})
+	select {
+	case msg := <-ack:
+		if msg != "" {
+			t.Fatalf("playing-host join %q rejected: %q", name, msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("playing-host join %q: no ack", name)
+	}
+}
+
+func TestPlayingHostIsAPlayer(t *testing.T) {
+	r := NewRoom("ph1")
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 32)
+	joinPlaying(t, r, "boss", sub)
+	s := nextState(t, sub)
+	if s.Host != "boss" {
+		t.Fatalf("host = %q, want boss", s.Host)
+	}
+	if !s.HostPlays {
+		t.Fatal("HostPlays = false, want true for a playing host")
+	}
+	if s.playerIndex("boss") < 0 {
+		t.Fatalf("playing host not in the roster: %+v", s.Players)
+	}
+}
+
+func TestPlayingHostStartsAndPlays(t *testing.T) {
+	r := NewRoom("ph2")
+	go r.Run()
+	defer r.Stop()
+
+	bossCh := make(chan GameState, 64)
+	joinPlaying(t, r, "boss", bossCh)
+	for _, n := range []string{"alice", "bob", "carol"} {
+		joinOK(t, r, n, make(chan GameState, 16))
+	}
+
+	// The playing host counts toward the minimum (boss + 3 = 4) and can start.
+	r.Submit(Command{Kind: CmdStart, Player: "boss"})
+	got := awaitPhase(t, bossCh, PhaseDrawing)
+	if got.YourPrompt == "" {
+		t.Fatal("playing host got no prompt — they should draw like any player")
+	}
+}
+
+func TestPlayingHostCountsTowardMinPlayers(t *testing.T) {
+	r := NewRoom("ph3")
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 64)
+	joinPlaying(t, r, "boss", sub)
+	joinOK(t, r, "alice", make(chan GameState, 16))
+	joinOK(t, r, "bob", make(chan GameState, 16))
+
+	// boss + 2 = 3 connected, below minPlayers (4): start is ignored.
+	r.Submit(Command{Kind: CmdStart, Player: "boss"})
+	if s := poke(t, r, sub); s.Phase != PhaseLobby {
+		t.Fatalf("phase = %q, want lobby (3 < %d)", s.Phase, minPlayers)
+	}
+
+	// A fourth participant lets the playing host start.
+	joinOK(t, r, "carol", make(chan GameState, 16))
+	r.Submit(Command{Kind: CmdStart, Player: "boss"})
+	awaitPhase(t, sub, PhaseDrawing)
+}
+
+func TestPlayingHostLeaveHandsOff(t *testing.T) {
+	r := NewRoom("ph4", WithGrace(time.Hour))
+	go r.Run()
+	defer r.Stop()
+
+	bossCh := make(chan GameState, 16)
+	joinPlaying(t, r, "boss", bossCh)
+	playerCh := make(chan GameState, 16)
+	joinOK(t, r, "alice", playerCh)
+	drain(playerCh)
+
+	// The playing host leaving hands the room to alice; it stays open and boss is
+	// dropped from the roster.
+	r.Submit(Command{Kind: CmdLeave, Player: "boss", Unsub: bossCh})
+	s := awaitHostIs(t, playerCh, "alice")
+	if s.Closed {
+		t.Fatal("room closed after the playing host handed off, want open")
+	}
+	if s.playerIndex("boss") >= 0 {
+		t.Fatalf("boss still in roster after leaving: %+v", s.Players)
+	}
+}
+
+func TestPlayingHostReconnectKeepsRoom(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("ph5", WithGrace(40*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinPlaying(t, r, "boss", sub)
+	r.Submit(Command{Kind: CmdDisconnect, Player: "boss", Unsub: sub})
+	sub2 := make(chan GameState, 16)
+	joinPlaying(t, r, "boss", sub2) // reconnect before grace
+	select {
+	case <-reaped:
+		t.Fatal("room reaped despite the playing host reconnecting before grace")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestPlayingHostDisconnectClosesAfterGrace(t *testing.T) {
+	reaped := make(chan struct{}, 1)
+	r := NewRoom("ph6", WithGrace(20*time.Millisecond),
+		WithReaper(func() { reaped <- struct{}{} }))
+	go r.Run()
+	defer r.Stop()
+
+	sub := make(chan GameState, 16)
+	joinPlaying(t, r, "boss", sub)
+	r.Submit(Command{Kind: CmdDisconnect, Player: "boss", Unsub: sub})
+	select {
+	case <-reaped:
+	case <-time.After(time.Second):
+		t.Fatal("room not reaped after the playing host stayed gone past grace")
+	}
+}
+
 // joinOK submits a join and asserts the room accepts it (empty ack).
 func joinOK(t *testing.T, r *Room, name string, sub chan GameState) {
 	t.Helper()
@@ -687,7 +846,7 @@ func TestRoomReapedWhenHostLeaves(t *testing.T) {
 	}
 }
 
-func TestPlayersRemainButHostGoneReaps(t *testing.T) {
+func TestHostGonePastGraceHandsOffToPlayer(t *testing.T) {
 	reaped := make(chan struct{}, 1)
 	r := NewRoom("hostreq", WithGrace(20*time.Millisecond),
 		WithReaper(func() { reaped <- struct{}{} }))
@@ -696,13 +855,20 @@ func TestPlayersRemainButHostGoneReaps(t *testing.T) {
 
 	hostSub := make(chan GameState, 16)
 	joinSpec(t, r, "tv", hostSub)
-	joinOK(t, r, "alice", make(chan GameState, 16)) // a player stays
+	aliceSub := make(chan GameState, 16)
+	joinOK(t, r, "alice", aliceSub) // a player stays
 
+	// The host's socket drops and doesn't return within grace: rather than reaping,
+	// the room hands off to alice, who stays to keep playing.
 	r.Submit(Command{Kind: CmdDisconnect, Player: "tv", Unsub: hostSub})
+	s := awaitHostIs(t, aliceSub, "alice")
+	if !s.HostPlays {
+		t.Fatal("HostPlays = false after hand-off past grace, want true")
+	}
 	select {
 	case <-reaped:
-	case <-time.After(time.Second):
-		t.Fatal("room not reaped after the required host disconnected, players present")
+		t.Fatal("room reaped despite a player being available to take over")
+	case <-time.After(60 * time.Millisecond):
 	}
 }
 
@@ -1162,8 +1328,8 @@ func TestHostRevealCarriesGallery(t *testing.T) {
 	for _, n := range []string{"alice", "bob", "carol", "dave"} {
 		draft(r, n)
 	}
-	r.advance()         // → guessing, picks a featured artist
-	r.beginReveal()     // → reveal
+	r.advance()     // → guessing, picks a featured artist
+	r.beginReveal() // → reveal
 	if r.state.Phase != PhaseReveal {
 		t.Fatalf("phase = %q, want reveal", r.state.Phase)
 	}
@@ -1237,6 +1403,113 @@ func TestTwoDrawingsStillGuess(t *testing.T) {
 	r.advance()
 	if r.state.Phase != PhaseGuessing {
 		t.Fatalf("phase = %q, want guessing (two drawings is a real round)", r.state.Phase)
+	}
+}
+
+// guessFeatureToReveal finds the featured artist in the current guessing phase
+// and has every other player correctly identify them, advancing to that feature's
+// reveal. Used to click through a round that guesses several drawings in a row.
+func guessFeatureToReveal(t *testing.T, r *Room, chans map[string]chan GameState, names []string) {
+	t.Helper()
+	// Drain stale broadcasts, then force one fresh frame: a single feature emits
+	// several guessing broadcasts as guesses land, so without this a later feature
+	// could read a leftover earlier-feature view and misidentify the artist.
+	for _, n := range names {
+		drain(chans[n])
+	}
+	r.Submit(Command{Kind: CmdStart, Player: "\x00nobody"}) // not host → no-op rebroadcast
+	artist := ""
+	for _, n := range names {
+		if v := awaitPhase(t, chans[n], PhaseGuessing); v.YouAreArtist {
+			artist = n
+		}
+	}
+	if artist == "" {
+		t.Fatal("no featured artist surfaced in the guessing phase")
+	}
+	for _, n := range names {
+		if n != artist {
+			r.Submit(Command{Kind: CmdSubmitGuess, Player: n, Guess: artist})
+		}
+	}
+	awaitPhase(t, chans[names[0]], PhaseReveal)
+}
+
+func TestGuessesForPlayersScales(t *testing.T) {
+	cases := []struct{ players, want int }{
+		{4, 2}, {5, 2}, // small rooms guess two drawings
+		{6, 3}, {8, 3}, // +1 per ~3 extra players
+		{9, 4}, {11, 4},
+		{12, 5}, // capped at maxFeatures (the room cap lands here naturally)
+	}
+	for _, c := range cases {
+		if got := guessesForPlayers(c.players); got != c.want {
+			t.Fatalf("guessesForPlayers(%d) = %d, want %d", c.players, got, c.want)
+		}
+		if got := guessesForPlayers(c.players); got > maxFeatures {
+			t.Fatalf("guessesForPlayers(%d) = %d, exceeds maxFeatures %d", c.players, got, maxFeatures)
+		}
+	}
+}
+
+func TestRoundGuessesMultipleDistinctDrawings(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		draft(r, n)
+	}
+	r.advance() // drawing timer → first feature's guessing
+
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing", r.state.Phase)
+	}
+	if r.state.FeatureCount != 2 {
+		t.Fatalf("featureCount = %d, want 2 (four players)", r.state.FeatureCount)
+	}
+	if r.state.FeatureIndex != 1 {
+		t.Fatalf("featureIndex = %d, want 1 (first drawing)", r.state.FeatureIndex)
+	}
+	first := r.state.Featured
+
+	// Reveal the first drawing, then the host advances to the second one.
+	r.beginReveal()
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"})
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing for the second drawing", r.state.Phase)
+	}
+	if r.state.FeatureIndex != 2 {
+		t.Fatalf("featureIndex = %d, want 2 (second drawing)", r.state.FeatureIndex)
+	}
+	if second := r.state.Featured; second == first {
+		t.Fatalf("featured the same artist twice in one round: %q", second)
+	}
+
+	// Reveal the second drawing, then advancing rolls into the next round.
+	r.beginReveal()
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"})
+	if r.state.Phase != PhaseDrawing {
+		t.Fatalf("phase = %q, want drawing (round 2)", r.state.Phase)
+	}
+	if r.state.Round != 2 {
+		t.Fatalf("round = %d, want 2", r.state.Round)
+	}
+	if r.state.FeatureIndex != 0 || r.state.FeatureCount != 0 || r.state.RoundFeatured != nil {
+		t.Fatalf("feature state not reset on the new round: idx=%d count=%d featured=%v",
+			r.state.FeatureIndex, r.state.FeatureCount, r.state.RoundFeatured)
+	}
+}
+
+func TestFeatureCountCappedByDrawers(t *testing.T) {
+	// Six players would target three drawings, but only two actually draw — so the
+	// round can guess at most those two.
+	r := syncRoom(t, "p1", "p2", "p3", "p4", "p5", "p6")
+	if got := guessesForPlayers(len(r.state.Players)); got != 3 {
+		t.Fatalf("guessesForPlayers(6) = %d, want 3 (precondition)", got)
+	}
+	draft(r, "p1")
+	draft(r, "p2")
+	r.advance()
+	if r.state.FeatureCount != 2 {
+		t.Fatalf("featureCount = %d, want 2 (capped by the two who drew)", r.state.FeatureCount)
 	}
 }
 

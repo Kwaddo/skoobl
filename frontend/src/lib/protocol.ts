@@ -47,9 +47,17 @@ export interface GameState {
   code: string;
   phase: Phase;
   host: string;
+  // true ⇒ the host is also a player (no separate display screen); false ⇒ the
+  // host is the non-playing big screen.
+  hostPlays?: boolean;
   players: Player[];
   round?: number;
   totalRounds?: number;
+  // A round guesses through several drawings, one at a time. featureIndex is the
+  // 1-based drawing on show; featureCount is how many this round has. Lets the UI
+  // render "Drawing 2 of 3".
+  featureIndex?: number;
+  featureCount?: number;
   language?: Language;
   drawMs?: number;
   guessMs?: number;
@@ -66,6 +74,9 @@ export interface GameState {
   youAreArtist?: boolean;
   yourGuess?: string;
   reveal?: Reveal | null;
+  // Reveal phase, host only: artists already revealed this round, so the gallery
+  // shows their names and keeps the not-yet-guessed drawings' names hidden.
+  roundFeatured?: string[];
   // Final frame sent when the host leaves: the room is gone, kick to the menu.
   closed?: boolean;
 }

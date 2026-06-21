@@ -4,60 +4,83 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* `short:` applies when the viewport is too short for the stacked drawing layout
-   *and* wide enough to put the tools beside the canvas — i.e. a short, landscape
-   window. The landscape gate (min-aspect-ratio) keeps it from firing on phones in
-   portrait, whose height can dip under 760px (small screens, browser chrome) yet
-   still want the big stacked canvas above the palette, not a squished side-by-side. */
-@custom-variant short (@media (max-height: 760px) and (min-aspect-ratio: 1/1));
+/* `short:` is the landscape-PHONE drawing layout: too short for the stacked
+   canvas, wide enough to sit the tools beside it. The min-aspect-ratio gate keeps
+   it off portrait phones (whose height can dip under 760px yet still want the big
+   stacked canvas). The max-width gate keeps it off desktops — a short, wide laptop
+   window is a desktop and must be governed by `lg:` alone, not collide with it
+   (short: is registered after lg and would otherwise win, forcing phone widths). */
+@custom-variant short (@media (max-height: 760px) and (min-aspect-ratio: 1/1) and (max-width: 1023px));
 
-/* ── skoobl: black & white arcade ───────────────────────────────────────────
-   Pure monochrome UI — ink-black field, chalk-white ink, chunky "key-cap"
-   buttons with hard offset shadows. Everything glides on soft cubic eases.
-   The drawing canvas keeps its full-color palette (see lib/canvas.ts).
-   Unbounded (display) / Hanken Grotesk (UI) / Space Mono (codes).            */
+/* ── skoobl: "ink & paper" ───────────────────────────────────────────────────
+   A hand-drawn print-shop identity for a drawing game. Everything looks inked
+   and stamped: thick ink outlines, hard offset "sticker" shadows, halftone
+   texture, washi-tape on drawings, marker underlines, badges slapped on at
+   angles. DARK = chalkboard (chalk on slate); LIGHT = sketchbook (charcoal on
+   warm paper). Both are drawing surfaces — the whole point of the game. The
+   canvas itself keeps its full-color palette (see lib/canvas.ts).
+   Unbounded (display) / Hanken Grotesk (UI) / Caveat (handwritten accents) /
+   Space Mono (codes).                                                          */
 
 @theme {
-  --color-background: #08080a;
-  --color-surface: #131316;
-  --color-surface-2: #1c1c20;
-  --color-foreground: #f6f6f4;
-  --color-muted: #8d8d96;
-  --color-border: #2b2b31;
+  /* DARK (chalkboard) defaults; [data-theme="light"] flips them below. */
+  --color-background: #0d0d10;
+  --color-surface: #17171b;
+  --color-surface-2: #212127;
+  --color-foreground: #f5f2e9;
+  --color-muted: #93939c;
+  --color-border: #34343d;
 
-  /* white is the action color: black text on white keycaps */
-  --color-primary: #f6f6f4;
-  --color-primary-foreground: #08080a;
-  --color-secondary: #f6f6f4;
-  --color-secondary-foreground: #08080a;
+  /* ink is the drawing colour — black text on chalk keys, chalk on slate */
+  --color-primary: #f5f2e9;
+  --color-primary-foreground: #0d0d10;
+  --color-secondary: #f5f2e9;
+  --color-secondary-foreground: #0d0d10;
   --color-accent: #ffffff;
 
   --font-display: "Unbounded", system-ui, sans-serif;
   --font-sans: "Hanken Grotesk", system-ui, sans-serif;
+  --font-hand: "Caveat", "Hanken Grotesk", cursive;
   --font-mono: "Space Mono", ui-monospace, monospace;
 
-  --radius: 1.25rem;
+  /* drawn corners — tighter and squarer than a soft pill, so cards read as
+     printed panels, not bubbles */
+  --radius: 0.85rem;
   --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* a springy overshoot for stamped/sticker entrances */
+  --ease-spring: linear(
+    0, 0.1 7%, 0.3 13%, 0.65 22%, 1.02 33%, 1.08 40%, 1.04 50%, 0.99 65%, 1
+  );
 }
 
 /* ── theme variables ────────────────────────────────────────────────────────
-   The @theme tokens above are the DARK defaults. Below, :root restates the
-   theme-dependent helper variables for dark, and [data-theme="light"] flips
-   every token + helper for light. Both are unlayered so they reliably win over
-   the generated token layer. Avatars read --av-* / --av-ink so they recolor for
-   free when the theme changes.                                               */
+   The @theme tokens above are the DARK (chalkboard) defaults. Below, :root
+   restates the theme-dependent helpers for dark, and [data-theme="light"] flips
+   every token + helper for the paper theme. Both unlayered so they reliably win
+   over the generated token layer. Avatars read --av-* so they recolor for free.
+   --ink / --ink-edge drive the hard "sticker" outlines and offset shadows.     */
 :root {
   color-scheme: dark;
-  --glow-1: rgba(255, 255, 255, 0.07);
-  --glow-2: rgba(255, 255, 255, 0.05);
-  --grid-dot: rgba(255, 255, 255, 0.11);
-  --grid-opacity: 0.75;
+  --glow-1: rgba(255, 255, 255, 0.06);
+  --glow-2: rgba(255, 255, 255, 0.04);
+  --grid-dot: rgba(255, 255, 255, 0.1);
+  --grid-opacity: 0.6;
+  --vignette: rgba(0, 0, 0, 0.55);
+  --hatch: rgba(255, 255, 255, 0.022);
   --hover-tint: rgba(255, 255, 255, 0.06);
-  --ring: rgba(255, 255, 255, 0.12);
+  --ring: rgba(255, 255, 255, 0.14);
   --inset-hi: rgba(255, 255, 255, 0.05);
 
-  --av-ink: #08080a;
-  --av-bg: #f6f6f4;
+  /* ink = the printed line colour; ink-edge = the hard offset shadow tint */
+  --ink: #f5f2e9;
+  --ink-edge: rgba(245, 242, 233, 0.42);
+  --ink-edge-strong: rgba(245, 242, 233, 0.85);
+  --tape: rgba(245, 242, 233, 0.1);
+  --tape-edge: rgba(245, 242, 233, 0.22);
+  --grain-opacity: 0.05;
+
+  --av-ink: #0d0d10;
+  --av-bg: #f5f2e9;
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.18);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
@@ -65,29 +88,38 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --color-background: #f6f6f4;
-  --color-surface: #ffffff;
-  --color-surface-2: #efefec;
-  --color-foreground: #121216;
-  --color-muted: #6c6c74;
-  --color-border: #dcdbd4;
+  --color-background: #efeadd;
+  --color-surface: #faf6ec;
+  --color-surface-2: #ece5d5;
+  --color-foreground: #1b1813;
+  --color-muted: #6c665a;
+  --color-border: #d2cab6;
 
-  --color-primary: #121216;
-  --color-primary-foreground: #fafafa;
-  --color-secondary: #121216;
-  --color-secondary-foreground: #fafafa;
+  --color-primary: #1b1813;
+  --color-primary-foreground: #faf6ec;
+  --color-secondary: #1b1813;
+  --color-secondary-foreground: #faf6ec;
   --color-accent: #000000;
 
-  --glow-1: rgba(0, 0, 0, 0.06);
-  --glow-2: rgba(0, 0, 0, 0.05);
-  --grid-dot: rgba(0, 0, 0, 0.18);
-  --grid-opacity: 0.65;
-  --hover-tint: rgba(0, 0, 0, 0.05);
-  --ring: rgba(0, 0, 0, 0.14);
-  --inset-hi: rgba(255, 255, 255, 0.7);
+  --glow-1: rgba(120, 100, 60, 0.08);
+  --glow-2: rgba(80, 70, 50, 0.06);
+  --grid-dot: rgba(60, 50, 30, 0.16);
+  --grid-opacity: 0.5;
+  --vignette: rgba(70, 58, 34, 0.12);
+  --hatch: rgba(40, 30, 10, 0.03);
+  --hover-tint: rgba(40, 30, 10, 0.05);
+  --ring: rgba(30, 25, 15, 0.16);
+  --inset-hi: rgba(255, 255, 255, 0.8);
 
-  --av-ink: #f6f6f4;
-  --av-bg: #2a2a2e;
+  --ink: #1b1813;
+  --ink-edge: rgba(27, 24, 19, 0.9);
+  --ink-edge-strong: rgba(27, 24, 19, 1);
+  --tape: rgba(27, 24, 19, 0.07);
+  --tape-edge: rgba(27, 24, 19, 0.16);
+  --grain-opacity: 0.06;
+
+  --av-ink: #faf6ec;
+  --av-bg: #2a2620;
 
   --scrollbar-thumb: rgba(0, 0, 0, 0.22);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.36);
@@ -102,10 +134,11 @@ body {
   -webkit-font-smoothing: antialiased;
   /* no rubber-band / pull-to-refresh on mobile while drawing near edges */
   overscroll-behavior: none;
-  /* soft glows in the corners for depth (tint adapts to the theme) */
+  /* corner glows + a soft vignette so the page reads as a lit sheet of paper */
   background-image:
     radial-gradient(44rem 44rem at 12% -10%, var(--glow-1), transparent 70%),
-    radial-gradient(40rem 40rem at 108% 112%, var(--glow-2), transparent 70%);
+    radial-gradient(40rem 40rem at 108% 112%, var(--glow-2), transparent 70%),
+    radial-gradient(120% 90% at 50% 50%, transparent 58%, var(--vignette) 100%);
   background-attachment: fixed;
   overflow: hidden;
   transition:
@@ -113,7 +146,8 @@ body {
     color 0.5s var(--ease-out-soft);
 }
 
-/* slowly drifting dotted grid — the "alive" backdrop, sits behind everything */
+/* drifting halftone — two dot layers at different scales for a real printed feel
+   (big sparse dots over a fine grid) plus a faint diagonal hatch in the field. */
 body::before {
   content: "";
   position: fixed;
@@ -121,36 +155,43 @@ body::before {
   z-index: 0;
   pointer-events: none;
   opacity: var(--grid-opacity);
-  background-image: radial-gradient(
-    circle,
-    var(--grid-dot) 1px,
-    transparent 1px
-  );
-  background-size: 24px 24px;
+  background-image:
+    radial-gradient(var(--grid-dot) 1.1px, transparent 1.3px),
+    radial-gradient(var(--grid-dot) 1.6px, transparent 1.8px),
+    repeating-linear-gradient(
+      -45deg,
+      var(--hatch) 0 1px,
+      transparent 1px 13px
+    );
+  background-size:
+    22px 22px,
+    66px 66px,
+    auto;
+  background-position:
+    0 0,
+    11px 11px,
+    0 0;
   animation: grid-drift 26s linear infinite;
 }
 
-/* film grain overlay */
+/* paper-fibre / chalk-dust grain overlay */
 body::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.04;
+  opacity: var(--grain-opacity);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* lifts page content above the fixed grain/grid layers */
+/* lifts page content above the fixed grain/halftone layers */
 .grain-above {
   position: relative;
   z-index: 1;
 }
 
-/* ── minimal thin scrollbar ──────────────────────────────────────────────────
-   A slim, track-less scrollbar for any overflowing container, themed to a faint
-   foreground tint that darkens on hover. Firefox uses scrollbar-width/-color;
-   Chromium/WebKit use the ::-webkit-scrollbar pseudo-elements. */
+/* ── minimal thin scrollbar ──────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -173,10 +214,7 @@ body::after {
   background: transparent;
 }
 
-/* ── gamified cursor ─────────────────────────────────────────────────────────
-   A chunky arrow (white fill, black outline → visible on any background) across
-   the whole game; an accented variant on anything clickable; text caret in
-   inputs; not-allowed on disabled buttons. The canvas keeps its own crosshair. */
+/* ── gamified cursor ─────────────────────────────────────────────────────── */
 body {
   cursor:
     url("/cursor.svg") 4 4,
@@ -200,9 +238,7 @@ select {
   cursor: text;
 }
 
-/* ── mobile touch hardening ──────────────────────────────────────────────────
-   Controls respond instantly (no 300ms tap delay, no double-tap zoom); the
-   drawing canvas never shows the long-press callout / selection. */
+/* ── mobile touch hardening ──────────────────────────────────────────────── */
 a,
 button,
 [role="button"],
@@ -216,33 +252,150 @@ canvas {
 }
 
 @layer components {
+  /* ── inked panel: the workhorse card ──────────────────────────────────────
+     A thick ink outline with a hard offset edge (printed-sticker look) plus a
+     soft drop for depth. Used everywhere — kept restrained so dense grids of
+     tiles don't get noisy. */
   .card-arcade {
+    position: relative;
     background: var(--color-surface);
     border: 2px solid var(--color-border);
     border-radius: var(--radius);
     box-shadow:
       0 1px 0 0 var(--inset-hi) inset,
-      0 24px 60px -28px rgba(0, 0, 0, 0.5);
+      3px 3px 0 -1px var(--ink-edge),
+      0 22px 50px -30px rgba(0, 0, 0, 0.55);
     transition:
       border-color 0.25s var(--ease-out-soft),
       background-color 0.5s var(--ease-out-soft),
       color 0.5s var(--ease-out-soft),
-      transform 0.25s var(--ease-out-soft),
+      transform 0.22s var(--ease-out-soft),
       box-shadow 0.25s var(--ease-out-soft);
   }
 
-  /* a card that reacts to hover — used for interactive tiles */
+  /* interactive tile: lifts + the ink edge deepens on hover */
   .card-hover:hover {
-    border-color: color-mix(in oklab, var(--color-foreground) 45%, transparent);
-    transform: translateY(-3px);
+    border-color: var(--ink);
+    transform: translateY(-3px) rotate(-0.4deg);
     box-shadow:
       0 1px 0 0 var(--inset-hi) inset,
-      0 30px 60px -26px rgba(0, 0, 0, 0.55);
+      5px 6px 0 -1px var(--ink-edge),
+      0 28px 56px -28px rgba(0, 0, 0, 0.6);
   }
 
-  /* primary "key cap" button: hard offset shadow + press-down on click */
+  /* ── ink-block: the loud, signature card ──────────────────────────────────
+     Full ink outline + a chunky hard offset block, no blur. For hero moments —
+     the code card, the reveal answer, lock-in, the winner banner. Pair with
+     .tilt-l / .tilt-r for a slapped-on angle. */
+  .ink-block {
+    position: relative;
+    background: var(--color-surface);
+    border: 2.5px solid var(--ink);
+    border-radius: var(--radius);
+    box-shadow:
+      6px 7px 0 0 var(--ink-edge),
+      0 26px 50px -30px rgba(0, 0, 0, 0.5);
+  }
+
+  .tilt-l {
+    transform: rotate(-1.4deg);
+  }
+  .tilt-r {
+    transform: rotate(1.4deg);
+  }
+
+  /* ── sticker: a badge slapped on at an angle ──────────────────────────────
+     Ink outline pill with a hard mini-shadow and a slight rotation. For chips:
+     leader, live, round, "done". Set --rot to vary the lean. */
+  .sticker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: 2px solid var(--ink);
+    border-radius: 999px;
+    background: var(--color-surface);
+    box-shadow: 2px 2px 0 0 var(--ink-edge);
+    transform: rotate(var(--rot, -2.5deg));
+  }
+  .sticker-solid {
+    background: var(--ink);
+    color: var(--color-surface);
+  }
+
+  /* ── marker underline: a hand-inked stroke beneath a heading ──────────────*/
+  .ink-underline {
+    position: relative;
+  }
+  .ink-underline::after {
+    content: "";
+    position: absolute;
+    left: -3px;
+    right: -3px;
+    bottom: -0.32em;
+    height: 0.28em;
+    background: var(--ink);
+    border-radius: 999px 999px 999px 2px;
+    transform: rotate(-0.7deg);
+  }
+
+  /* ── washi tape: a strip stuck across the top of a taped-up drawing ────────*/
+  .tape {
+    position: relative;
+  }
+  .tape::before {
+    content: "";
+    position: absolute;
+    top: -0.7rem;
+    left: 50%;
+    width: 4.2rem;
+    height: 1.35rem;
+    transform: translateX(-50%) rotate(-3.5deg);
+    background: var(--tape);
+    border-left: 1px dashed var(--tape-edge);
+    border-right: 1px dashed var(--tape-edge);
+    backdrop-filter: saturate(0) brightness(1.1);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* ── crop / registration marks: print-shop corner brackets ────────────────*/
+  .crop-marks {
+    position: relative;
+  }
+  .crop-marks::before,
+  .crop-marks::after {
+    content: "";
+    position: absolute;
+    width: 0.85rem;
+    height: 0.85rem;
+    pointer-events: none;
+    border-color: var(--color-muted);
+    border-style: solid;
+    opacity: 0.65;
+  }
+  .crop-marks::before {
+    top: 0.55rem;
+    left: 0.55rem;
+    border-width: 2px 0 0 2px;
+  }
+  .crop-marks::after {
+    bottom: 0.55rem;
+    right: 0.55rem;
+    border-width: 0 2px 2px 0;
+  }
+
+  /* dashed "cut here" divider */
+  .cut-line {
+    border: none;
+    border-top: 2px dashed var(--color-border);
+    height: 0;
+  }
+
+  /* ── primary "ink stamp" button ───────────────────────────────────────────
+     A solid ink block with a hard offset that collapses on press — a stamp
+     pressed into the page. Keeps the travelling sheen sweep on hover. */
   .btn-key {
-    --shadow-color: #000;
+    --shadow-color: var(--ink-edge-strong);
     position: relative;
     display: inline-flex;
     align-items: center;
@@ -253,21 +406,21 @@ canvas {
     letter-spacing: -0.01em;
     color: var(--color-primary-foreground);
     background: var(--color-primary);
-    border-radius: 999px;
+    border: 2.5px solid var(--ink);
+    border-radius: 0.8rem;
     overflow: hidden;
     box-shadow:
-      0 5px 0 0 var(--shadow-color),
-      0 16px 28px -14px rgba(0, 0, 0, 0.8);
+      5px 6px 0 0 var(--shadow-color),
+      0 16px 28px -16px rgba(0, 0, 0, 0.7);
     transition:
-      transform 0.08s var(--ease-out-soft),
-      box-shadow 0.08s var(--ease-out-soft),
+      transform 0.09s var(--ease-out-soft),
+      box-shadow 0.09s var(--ease-out-soft),
       background-color 0.5s var(--ease-out-soft),
       color 0.5s var(--ease-out-soft),
       border-color 0.5s var(--ease-out-soft),
       filter 0.2s ease;
   }
-  /* travelling sheen on hover — tinted with the button's foreground colour so it
-     contrasts with the face (a dark sweep on white keys, a light one on black). */
+  /* travelling sheen — tinted to contrast with the ink face */
   .btn-key::after {
     content: "";
     position: absolute;
@@ -275,7 +428,7 @@ canvas {
     background: linear-gradient(
       105deg,
       transparent 35%,
-      color-mix(in oklab, var(--color-primary-foreground) 40%, transparent) 50%,
+      color-mix(in oklab, var(--color-primary-foreground) 38%, transparent) 50%,
       transparent 65%
     );
     transform: translateX(-120%);
@@ -288,7 +441,7 @@ canvas {
     filter: brightness(1.04);
   }
   .btn-key:active {
-    transform: translateY(5px);
+    transform: translate(5px, 6px);
     box-shadow:
       0 0 0 0 var(--shadow-color),
       0 6px 14px -10px rgba(0, 0, 0, 0.8);
@@ -296,12 +449,30 @@ canvas {
   .btn-key:disabled {
     filter: grayscale(1) brightness(0.55);
     cursor: not-allowed;
-    box-shadow: 0 5px 0 0 #000;
+    box-shadow: 5px 6px 0 0 var(--ink-edge);
   }
   .btn-key:disabled::after {
     display: none;
   }
 
+  /* secondary stamp: the same key-cap shape, shadow and press as .btn-key, but a
+     surface (paper / chalk-panel) face with an ink outline instead of a solid ink
+     fill — pairs with .btn-key as a "same style, different colour" choice. */
+  .btn-key--ghost {
+    color: var(--color-foreground);
+    background: var(--color-surface);
+    border-color: var(--ink);
+  }
+  .btn-key--ghost::after {
+    background: linear-gradient(
+      105deg,
+      transparent 35%,
+      color-mix(in oklab, var(--color-foreground) 20%, transparent) 50%,
+      transparent 65%
+    );
+  }
+
+  /* outline "inked" secondary button */
   .btn-ghost {
     display: inline-flex;
     align-items: center;
@@ -315,28 +486,33 @@ canvas {
     transition:
       border-color 0.18s ease,
       background 0.18s ease,
+      box-shadow 0.18s var(--ease-out-soft),
       color 0.5s var(--ease-out-soft),
-      transform 0.08s var(--ease-out-soft);
+      transform 0.09s var(--ease-out-soft);
   }
   .btn-ghost:hover {
-    border-color: color-mix(in oklab, var(--color-foreground) 55%, transparent);
+    border-color: var(--ink);
     background: var(--hover-tint);
+    box-shadow: 2px 2px 0 0 var(--ink-edge);
   }
   .btn-ghost:active {
-    transform: translateY(2px);
+    transform: translate(1px, 2px);
+    box-shadow: 0 0 0 0 var(--ink-edge);
   }
   .btn-ghost:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
 
+  /* ── paper input field ────────────────────────────────────────────────── */
   .field {
     width: 100%;
     background: var(--color-surface-2);
     border: 2px solid var(--color-border);
-    border-radius: 1rem;
+    border-radius: 0.7rem;
     color: var(--color-foreground);
     font-size: 1.05rem;
+    box-shadow: inset 2px 2px 0 -1px var(--ink-edge);
     transition:
       border-color 0.2s ease,
       box-shadow 0.2s ease,
@@ -348,15 +524,32 @@ canvas {
   }
   .field:focus {
     outline: none;
-    border-color: var(--color-foreground);
-    box-shadow: 0 0 0 4px var(--ring);
+    border-color: var(--ink);
+    box-shadow:
+      inset 2px 2px 0 -1px var(--ink-edge),
+      0 0 0 4px var(--ring);
+  }
+
+  /* ── feature progress pips (Drawing 2 of 3) ───────────────────────────────*/
+  .pip {
+    border: 2px solid var(--ink);
+    background: transparent;
+    transition:
+      width 0.4s var(--ease-out-soft),
+      background-color 0.4s var(--ease-out-soft),
+      border-color 0.4s var(--ease-out-soft);
+  }
+  .pip-done {
+    background: var(--ink);
+  }
+  .pip-active {
+    background: var(--ink);
+    box-shadow: 1.5px 1.5px 0 0 var(--ink-edge);
+    animation: pip-breathe 1.6s ease-in-out infinite;
   }
 }
 
-/* ── color picker (react-colorful) ──────────────────────────────────────────
-   Sized to fit the toolbar popover and themed with our tokens. Higher
-   specificity (.cc-picker .react-colorful__…) overrides the library's own
-   single-class defaults regardless of stylesheet order. */
+/* ── color picker (react-colorful) ──────────────────────────────────────────*/
 .cc-picker .react-colorful {
   width: 100%;
   height: auto;
@@ -384,7 +577,7 @@ canvas {
     transform: translate(0, 0);
   }
   to {
-    transform: translate(24px, 24px);
+    transform: translate(22px, 22px);
   }
 }
 
@@ -423,6 +616,22 @@ canvas {
   animation-delay: var(--d, 0ms);
 }
 
+/* stick-on: a sticker thwacked onto the page at its resting angle (overshoot) */
+@keyframes stick-on {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--rot, -2.5deg)) scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(var(--rot, -2.5deg)) scale(1);
+  }
+}
+.stick-on {
+  animation: stick-on 0.45s var(--ease-spring) both;
+  animation-delay: var(--d, 0ms);
+}
+
 @keyframes pulse-dot {
   0%,
   100% {
@@ -452,6 +661,70 @@ canvas {
   animation: float 3.4s ease-in-out infinite;
 }
 
+/* drifting doodle — background sketchbook glyphs bob and turn on slow loops, each
+   seeded with its own rotation (--r) and negative delay so they're never in sync */
+@keyframes doodle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--r, 0deg));
+  }
+  50% {
+    transform: translateY(-14px) rotate(calc(var(--r, 0deg) + 7deg));
+  }
+}
+.doodle {
+  animation-name: doodle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* scrolling marquee — a ticker strip of the game's verbs */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: marquee 18s linear infinite;
+}
+
+/* confetti shard — a small ink chip tumbling down on a one-shot burst (win) */
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-10%) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(120vh) rotate(var(--spin, 540deg));
+    opacity: 0;
+  }
+}
+.confetti-piece {
+  position: absolute;
+  top: -5%;
+  animation: confetti-fall var(--dur, 2.4s) var(--ease-out-soft) var(--d, 0ms)
+    forwards;
+}
+
+/* hand-drawn wobble on hover — a touch of pen-jitter liveliness */
+@keyframes wobble {
+  0%,
+  100% {
+    transform: rotate(-1.2deg);
+  }
+  50% {
+    transform: rotate(1.2deg);
+  }
+}
+.wobble:hover {
+  animation: wobble 0.42s ease-in-out;
+}
+
 /* heartbeat — urgent timer */
 @keyframes heartbeat {
   0%,
@@ -464,6 +737,88 @@ canvas {
 }
 .heartbeat {
   animation: heartbeat 0.8s ease-in-out infinite;
+}
+
+/* materialize: a drawing wipes up into focus as it's revealed (clip-path reveal
+   + blur-to-sharp). Hardware-accelerated, no layout shift. */
+@keyframes clip-up {
+  from {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0.35;
+    filter: blur(5px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.reveal-clip {
+  animation: clip-up 0.6s var(--ease-out-soft) both;
+}
+
+/* stamp: an outcome glyph slams in — overshoot + settle, blur→sharp. Reserved
+   for rare, high-stakes moments (the round reveal), where delight is the point. */
+@keyframes stamp {
+  0% {
+    transform: scale(1.6) rotate(-9deg);
+    opacity: 0;
+    filter: blur(6px);
+  }
+  55% {
+    transform: scale(0.9) rotate(4deg);
+    opacity: 1;
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(1.06) rotate(-2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+.stamp {
+  animation: stamp 0.52s var(--ease-out-soft) both;
+}
+
+/* toast enter/exit — both move top→bottom: it drops in from above to settle,
+   then continues downward as it fades out (no instant pop-out). */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+.toast-in {
+  animation: toast-in 0.4s var(--ease-out-soft) both;
+}
+.toast-out {
+  animation: toast-out 0.35s var(--ease-out-soft) both;
+}
+
+/* the live feature pip gently breathes so the eye lands on the drawing on show */
+@keyframes pip-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* celebratory bounce — winner glyph */
@@ -489,8 +844,7 @@ canvas {
 
 /* ── theme switch ───────────────────────────────────────────────────────────
    Where the View Transitions API exists, the new theme is revealed by a circle
-   growing from the toggle (origin + radius set in JS). The old snapshot stays
-   put underneath while the new one wipes over it.                            */
+   growing from the toggle (origin + radius set in JS).                         */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;

@@ -49,11 +49,11 @@ export function Segmented<T extends string | number>({
 
   return (
     <div
-      className={`relative flex gap-1 rounded-xl border-2 border-border bg-surface-2 p-1 ${className}`}
+      className={`relative flex gap-1 rounded-xl border-2 border-foreground bg-surface-2 p-1 ${className}`}
     >
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute bottom-1 top-1 rounded-lg bg-primary ${
+        className={`pointer-events-none absolute bottom-1 top-1 rounded-lg border-2 border-foreground bg-primary shadow-[2px_2px_0_0_var(--ink-edge)] ${
           ready ? "transition-[left,width] duration-300 ease-out-soft" : ""
         }`}
         style={{ left: thumb.left, width: thumb.width }}

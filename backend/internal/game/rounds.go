@@ -35,8 +35,26 @@ func (r *Room) beginRound(n int) {
 	r.state.GuessTimes = map[string]int64{}
 	r.state.LastDeltas = nil
 	r.state.Featured = ""
+	r.state.RoundFeatured = nil
+	r.state.FeatureIndex = 0
+	r.state.FeatureCount = 0
 	r.state.Prompt = r.pickPrompt()
 	r.startPhase(PhaseDrawing, r.state.DrawMs)
+}
+
+// guessesForPlayers decides how many drawings a round guesses through, given the
+// room's headcount. Small rooms (≤5) guess 2; every ~3 extra players adds one
+// more, so a busier room sees more of everyone's art without dragging the round
+// out. Capped at maxFeatures (which, at the room cap, is the natural ceiling).
+func guessesForPlayers(players int) int {
+	n := 2
+	if players > 5 {
+		n += (players - 3) / 3 // 6-8→+1, 9-11→+2, 12→+3
+	}
+	if n > maxFeatures {
+		n = maxFeatures
+	}
+	return n
 }
 
 // pickPrompt chooses the single word everyone draws this round, from the custom
@@ -73,21 +91,67 @@ func (r *Room) advance() {
 	}
 }
 
+// beginGuessing opens the guessing stage once drawing ends. It sizes how many
+// drawings this round will guess through — the room's target (guessesForPlayers),
+// capped by how many people actually drew — then features the first one.
 func (r *Room) beginGuessing() {
-	r.state.Featured = r.pickFeatured()
-	if r.state.Featured == "" {
+	drew := r.drawerCount()
+	if drew == 0 {
 		// Nobody drew anything this round — there's nothing to guess, so skip
 		// straight to the reveal (which shows a "nobody drew" message).
+		r.state.FeatureCount = 0
+		r.state.FeatureIndex = 0
 		r.beginReveal()
 		return
 	}
+	r.state.FeatureCount = min(guessesForPlayers(len(r.state.Players)), drew)
+	r.state.FeatureIndex = 0
+	r.beginNextFeature()
+}
+
+// beginNextFeature shows the next not-yet-featured drawing of the round and opens
+// its own guessing phase (or a solo reveal when only one person drew). Per-feature
+// guess data is reset so every drawing is guessed and scored independently — a
+// round with K drawings is K back-to-back "who drew this?" rounds over one prompt.
+func (r *Room) beginNextFeature() {
+	r.state.Featured = r.pickFeatured()
+	if r.state.Featured == "" {
+		// No fresh drawing left to feature (e.g. a featured drawer left mid-round,
+		// dropping the pool below the planned count). The round's guessing is over.
+		r.advanceRound()
+		return
+	}
+	r.state.FeatureIndex++
+	r.state.RoundFeatured = append(r.state.RoundFeatured, r.state.Featured)
+	r.state.Guesses = map[string]string{}
+	r.state.GuessTimes = map[string]int64{}
+	r.state.LastDeltas = nil
 	if r.drawerCount() == 1 {
-		// Only one drawing exists, so "who drew it?" has a single trivially
-		// correct answer. Skip the guessing phase and award the lone artist.
+		// Only one drawing exists all round, so "who drew it?" has a single
+		// trivially correct answer. Skip guessing and award the lone artist.
 		r.beginSoloReveal()
 		return
 	}
 	r.startPhase(PhaseGuessing, r.state.GuessMs)
+}
+
+// advanceAfterReveal moves the room on once the host dismisses a reveal: to the
+// next drawing in this round if any remain, otherwise on to the next round / end.
+func (r *Room) advanceAfterReveal() {
+	if r.state.FeatureIndex < r.state.FeatureCount {
+		r.beginNextFeature()
+		return
+	}
+	r.advanceRound()
+}
+
+// advanceRound starts the next round, or ends the game after the last one.
+func (r *Room) advanceRound() {
+	if r.state.Round < r.state.TotalRounds {
+		r.beginRound(r.state.Round + 1)
+		return
+	}
+	r.endGame()
 }
 
 // drawerCount returns how many players drew something non-empty this round. An
@@ -118,11 +182,16 @@ func (r *Room) beginSoloReveal() {
 	r.startPhase(PhaseReveal, 0)
 }
 
-// pickFeatured chooses the single artist whose drawing is shown this round. It
-// only ever features a player who actually drew something (a blank canvas can't
-// be guessed), preferring a not-yet-featured drawer so coverage spreads across
-// rounds. Returns "" when nobody drew anything.
+// pickFeatured chooses the next artist whose drawing is shown. It only ever
+// features a player who actually drew something (a blank canvas can't be guessed)
+// and never one already featured this round (so a round never shows the same
+// drawing twice), preferring a not-yet-featured-this-game drawer so coverage
+// spreads across rounds. Returns "" when no eligible drawing is left.
 func (r *Room) pickFeatured() string {
+	thisRound := make(map[string]bool, len(r.state.RoundFeatured))
+	for _, n := range r.state.RoundFeatured {
+		thisRound[n] = true
+	}
 	past := make(map[string]bool, len(r.state.FeaturedPast))
 	for _, n := range r.state.FeaturedPast {
 		past[n] = true
@@ -132,6 +201,9 @@ func (r *Room) pickFeatured() string {
 	for _, p := range r.state.Players {
 		if len(r.state.Drawings[p.Name]) == 0 {
 			continue // never feature an empty canvas
+		}
+		if thisRound[p.Name] {
+			continue // already shown this round — never repeat a drawing
 		}
 		anyDrew = append(anyDrew, p.Name)
 		if !past[p.Name] {
@@ -151,6 +223,14 @@ func (r *Room) pickFeatured() string {
 // shrinks with each player who identifies them. Scores are computed before
 // startPhase resets the clock, so speedScore reads the live guess window.
 func (r *Room) beginReveal() {
+	if r.state.Featured != "" && r.state.playerIndex(r.state.Featured) < 0 {
+		// The featured artist left mid-guess. Don't reveal a player who's no
+		// longer here (and don't score guesses for a spoiled drawing) — move on
+		// to the next drawing this round, or end the round if none remain.
+		r.state.Featured = ""
+		r.advanceAfterReveal()
+		return
+	}
 	var deltas map[string]int
 	if r.state.Featured != "" {
 		deltas = map[string]int{}
@@ -206,6 +286,9 @@ func (r *Room) endGame() {
 	r.state.GuessTimes = nil
 	r.state.LastDeltas = nil
 	r.state.Featured = ""
+	r.state.RoundFeatured = nil
+	r.state.FeatureIndex = 0
+	r.state.FeatureCount = 0
 }
 
 // returnToLobby sends a finished game back to the lobby for a fresh round,
@@ -223,6 +306,9 @@ func (r *Room) returnToLobby() {
 	r.state.GuessTimes = nil
 	r.state.LastDeltas = nil
 	r.state.Featured = ""
+	r.state.RoundFeatured = nil
+	r.state.FeatureIndex = 0
+	r.state.FeatureCount = 0
 	r.state.FeaturedPast = nil
 	for i := range r.state.Players {
 		r.state.Players[i].Score = 0

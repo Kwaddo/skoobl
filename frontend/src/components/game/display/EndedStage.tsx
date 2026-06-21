@@ -1,3 +1,4 @@
+import { Confetti } from "@/components/Confetti";
 import { downloadStrokesPng, pngFilename } from "@/lib/canvas";
 import { useGameStore } from "@/lib/store";
 import { StrokesView } from "../canvas/StrokesView";
@@ -23,7 +24,8 @@ export function EndedStage({
   const youWon = winner?.name === name;
 
   const banner = (
-    <div className="card-arcade flex shrink-0 flex-col items-center gap-2 p-8 text-center">
+    <div className="ink-block tilt-l flex shrink-0 flex-col items-center gap-2 p-8 text-center">
+      {youWon && <Confetti />}
       <span className="trophy-bounce text-foreground">
         {youWon ? (
           <Trophy className="h-12 w-12" />
@@ -31,11 +33,14 @@ export function EndedStage({
           <Sparkle className="h-12 w-12" />
         )}
       </span>
-      <h2 className="font-display text-2xl font-bold">Game over</h2>
+      <h2 className="font-display text-3xl font-black">Game over</h2>
       {winner && (
-        <p className="text-sm text-muted">
-          Winner:{" "}
-          <span dir="auto" className="font-display font-bold text-foreground">
+        <p className="font-hand text-2xl leading-tight text-muted">
+          winner:{" "}
+          <span
+            dir="auto"
+            className="font-display text-xl font-black text-foreground"
+          >
             {winner.name}
           </span>{" "}
           with {winner.score ?? 0} pts
@@ -87,7 +92,7 @@ function PlayerEnded({ banner }: { banner: React.ReactNode }) {
   };
 
   return (
-    <div className="m-auto flex w-full max-w-2xl max-h-full min-h-0 flex-col gap-5">
+    <div className="m-auto flex w-full max-w-2xl max-h-full min-h-0 flex-col gap-5 lg:max-w-4xl">
       {banner}
       {rounds.length > 0 ? (
         <>
@@ -101,7 +106,7 @@ function PlayerEnded({ banner }: { banner: React.ReactNode }) {
               Download all ↓
             </button>
           </div>
-          <ul className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto pr-1 sm:grid-cols-3">
+          <ul className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
             {rounds.map((r) => (
               <li key={r} className="card-arcade flex flex-col gap-2 p-3">
                 <StrokesView strokes={myDrawings[r]} />
