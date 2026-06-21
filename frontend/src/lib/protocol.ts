@@ -30,6 +30,12 @@ export interface Stroke {
   fill?: boolean;
 }
 
+// One anonymized candidate doodle in flipped guessing.
+export interface PoolDrawing {
+  id: string;
+  strokes: Stroke[];
+}
+
 export interface Player {
   name: string;
   score?: number;
@@ -78,6 +84,10 @@ export interface GameState {
   youAreArtist?: boolean;
   yourGuess?: string;
   reveal?: Reveal | null;
+  // Flipped guessing only.
+  target?: string;
+  youAreTarget?: boolean;
+  pool?: PoolDrawing[];
   // Guessing phase: artists already revealed earlier this round. Each player draws
   // once, so these can't be the current drawing's artist — dropped from the options.
   revealed?: string[];

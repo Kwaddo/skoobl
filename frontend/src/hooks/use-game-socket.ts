@@ -96,6 +96,10 @@ export function useGameSocket(
       (artist: string) => emit("submitGuess", { artist }),
       [emit],
     ),
+    submitDoodleGuess: useCallback(
+      (id: string) => emit("submitGuess", { id }),
+      [emit],
+    ),
   };
 }
 

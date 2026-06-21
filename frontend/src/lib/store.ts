@@ -6,6 +6,7 @@ import type {
   Language,
   Phase,
   Player,
+  PoolDrawing,
   Reveal,
   Stroke,
 } from "./protocol";
@@ -53,6 +54,9 @@ interface GameStore {
   youAreArtist: boolean;
   yourGuess: string;
   reveal: Reveal | null;
+  target: string;
+  youAreTarget: boolean;
+  pool: PoolDrawing[];
   revealed: string[];
   roundFeatured: string[];
   closed: boolean;
@@ -95,6 +99,9 @@ const initial = {
   youAreArtist: false,
   yourGuess: "",
   reveal: null as Reveal | null,
+  target: "",
+  youAreTarget: false,
+  pool: [] as PoolDrawing[],
   revealed: [] as string[],
   roundFeatured: [] as string[],
   closed: false,
@@ -168,6 +175,9 @@ export const useGameStore = create<GameStore>((set) => ({
         youAreArtist: s.youAreArtist ?? false,
         yourGuess: s.yourGuess ?? "",
         reveal: s.reveal ?? null,
+        target: s.target ?? "",
+        youAreTarget: s.youAreTarget ?? false,
+        pool: s.pool ?? [],
         revealed: s.revealed ?? [],
         roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,

@@ -14,6 +14,7 @@ const noopActions = {
   submitDrawing: () => {},
   draftDrawing: () => {},
   submitGuess: () => {},
+  submitDoodleGuess: () => {},
 } as unknown as GameActions;
 
 describe("stage split", () => {
@@ -228,6 +229,29 @@ describe("stage split", () => {
     );
     expect(getAllByText("ann").length).toBeGreaterThanOrEqual(1);
     expect(getAllByText("bob").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flipped guessing shows a doodle grid for the target, not name buttons", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "flipped",
+      target: "bob",
+      youAreTarget: false,
+      players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
+      pool: [
+        { id: "d1", strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }] },
+        { id: "d2", strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }] },
+      ],
+    });
+    const { container, getByText, queryByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // Two candidate doodles rendered as canvases (the grid).
+    expect(container.querySelectorAll("canvas").length).toBe(2);
+    // Header names the target.
+    expect(getByText(/bob/i)).toBeTruthy();
+    // Not the classic "who drew it?" name list.
+    expect(queryByText(/who drew it/i)).toBeNull();
   });
 
   it("player ended shows their drawings with downloads, not the scoreboard", () => {

@@ -8,6 +8,7 @@ import { DrawingCanvas } from "../canvas/DrawingCanvas";
 import { StrokesView } from "../canvas/StrokesView";
 import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
+import { FlippedGuessing } from "../display/FlippedGuessing";
 import { PlayerGrid } from "../display/PlayerList";
 import { Timer } from "../display/Timer";
 import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "../icons";
@@ -186,6 +187,28 @@ export function PlayerGuessing({
   const revealed = useGameStore((s) => s.revealed);
   const remaining = useCountdown(endsAt);
 
+  const mode = useGameStore((s) => s.mode);
+  const target = useGameStore((s) => s.target);
+  const pool = useGameStore((s) => s.pool);
+  const youAreTarget = useGameStore((s) => s.youAreTarget);
+  const me = players.find((p) => p.name === name);
+
+  if (mode === "flipped") {
+    return (
+      <FlippedGuessing
+        target={target}
+        pool={pool}
+        youAreTarget={youAreTarget}
+        alreadyGuessed={me?.hasGuessed ?? false}
+        remaining={remaining}
+        guessMs={guessMs}
+        featureIndex={featureIndex}
+        featureCount={featureCount}
+        onPick={(id) => actions.submitDoodleGuess(id)}
+      />
+    );
+  }
+
   // Only players who actually drew something this round can be the artist, so
   // they're the only ones worth voting for (non-drawers are excluded). Artists
   // already revealed earlier this round are dropped too — each player draws once,
@@ -289,6 +312,8 @@ export function PlayerReveal({
   const reveal = useGameStore((s) => s.reveal);
   const players = useGameStore((s) => s.players);
   const round = useGameStore((s) => s.round);
+  const mode = useGameStore((s) => s.mode);
+  const answer = useGameStore((s) => s.currentDrawing);
   const totalRounds = useGameStore((s) => s.totalRounds);
   const featureIndex = useGameStore((s) => s.featureIndex);
   const featureCount = useGameStore((s) => s.featureCount);
@@ -371,6 +396,15 @@ export function PlayerReveal({
               </>
             )}
           </div>
+
+          {mode === "flipped" && answer.length > 0 && (
+            <div className="card-arcade tape mt-3 flex shrink-0 flex-col gap-3 p-4 lg:mt-0 lg:flex-1">
+              <span className="font-hand text-xl text-muted">
+                {reveal?.artist ? `${reveal.artist}'s doodle` : "the answer"}
+              </span>
+              <StrokesView strokes={answer} />
+            </div>
+          )}
 
           {mine.length > 0 && (
             // mt-3 leaves room for the tape strip so it doesn't touch the card above
