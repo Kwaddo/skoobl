@@ -1782,3 +1782,62 @@ func pickGuesser(names []string, target string) string {
 	}
 	return ""
 }
+
+func TestFlippedRoundRunsTwoFeaturesAndAdvances(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+
+	// 4 drawers, two-drawer margin ⇒ two features this round (same as classic).
+	if r.state.FeatureCount != 2 {
+		t.Fatalf("featureCount = %d, want 2", r.state.FeatureCount)
+	}
+	first := r.state.Featured
+
+	// Everyone matches the first target's doodle, then the host reveals + advances.
+	guessAllCorrect(r, names, first)
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal after first feature", r.state.Phase)
+	}
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"})
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing for the second feature", r.state.Phase)
+	}
+	second := r.state.Featured
+	if second == first {
+		t.Fatalf("featured the same target twice in one round: %q", second)
+	}
+
+	// No non-target view ever exposes which pool id is the second target's.
+	for _, n := range names {
+		if n == second {
+			continue
+		}
+		v := r.state.viewFor(n, r.present)
+		for _, d := range v.Pool {
+			if d.ID == r.state.DrawIDs[second] && len(v.Pool) == 1 {
+				t.Fatal("pool collapsed to a single labeled answer")
+			}
+		}
+	}
+
+	guessAllCorrect(r, names, second)
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"})
+	if r.state.Phase != PhaseDrawing || r.state.Round != 2 {
+		t.Fatalf("after the round: phase=%q round=%d, want drawing/2", r.state.Phase, r.state.Round)
+	}
+	if r.state.DrawIDs != nil {
+		t.Fatal("DrawIDs should be cleared at the start of a new round")
+	}
+}
+
+// guessAllCorrect has every non-target match the target's doodle id, driving the
+// feature to its reveal.
+func guessAllCorrect(r *Room, names []string, target string) {
+	id := r.state.DrawIDs[target]
+	for _, n := range names {
+		if n == target {
+			continue
+		}
+		r.handle(Command{Kind: CmdSubmitGuess, Player: n, GuessID: id})
+	}
+}
