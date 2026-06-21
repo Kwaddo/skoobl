@@ -19,10 +19,13 @@ export const CONNECTION_ERROR = "Can't reach the server — retrying…";
 export function useGameSocket(
   code: string,
   name: string,
-  opts: { spectator?: boolean } = {},
+  opts: { spectator?: boolean; play?: boolean } = {},
 ) {
   const socketRef = useRef<Socket | null>(null);
   const spectator = opts.spectator ?? false;
+  // A playing host joins as a player that also owns the room (play=true); a
+  // display host joins as a non-playing spectator.
+  const play = opts.play ?? false;
 
   useEffect(() => {
     if (!code || !name) return;
@@ -37,7 +40,11 @@ export function useGameSocket(
       useGameStore.getState().setError(null);
       socket.emit(
         "join",
-        spectator ? { code, name, spectator: true } : { code, name },
+        play
+          ? { code, name, play: true }
+          : spectator
+            ? { code, name, spectator: true }
+            : { code, name },
       );
     });
     socket.on("state", (s: GameState) => {
@@ -62,7 +69,7 @@ export function useGameSocket(
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [code, name, spectator]);
+  }, [code, name, spectator, play]);
 
   const emit = useCallback((event: string, payload?: unknown) => {
     socketRef.current?.emit(event, payload);

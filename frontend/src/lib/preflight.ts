@@ -14,6 +14,7 @@ export function preflightJoin(
   code: string,
   name: string,
   spectator: boolean,
+  play = false,
 ): Promise<string | null> {
   return new Promise((resolve) => {
     const socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
@@ -35,7 +36,11 @@ export function preflightJoin(
     socket.on("connect", () =>
       socket.emit(
         "join",
-        spectator ? { code, name, spectator: true } : { code, name },
+        play
+          ? { code, name, play: true }
+          : spectator
+            ? { code, name, spectator: true }
+            : { code, name },
       ),
     );
     socket.on("state", () => finish(null));

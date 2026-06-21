@@ -46,6 +46,10 @@ const (
 	minPlayers = 4
 	// maxPlayers caps a single room.
 	maxPlayers = 12
+	// maxFeatures caps how many drawings a single round guesses through, no matter
+	// the headcount — keeps even a full room's round from dragging (see
+	// guessesForPlayers). At maxPlayers this is the value the scale already lands on.
+	maxFeatures = 5
 
 	// Round configuration bounds and defaults.
 	DefaultRounds  = 3
@@ -108,7 +112,8 @@ type Command struct {
 	Kind      CmdKind
 	Player    string
 	Subscribe chan GameState // join: per-client broadcast channel
-	Spectator bool           // join: true for the host display (non-playing)
+	Spectator bool           // join: true for the host display (non-playing TV)
+	AsHost    bool           // join: true for a playing host (a player who owns the room)
 	Unsub     chan GameState // disconnect: channel to drop from the sub set
 	Ack       chan string    // join: "" on accept, else a rejection message
 	Gen       int            // prune/advance: generation captured when the timer was armed
@@ -226,7 +231,9 @@ func (r *Room) Run() {
 // abandoned restored rooms reap while reconnecting clients save themselves. A
 // restored mid-round resumes its phase timer so the game doesn't stall.
 func (r *Room) onStart() {
-	if r.state.Host != "" {
+	// A display host has its own (non-player) presence; a playing host is restored
+	// as one of the players below, so it doesn't get a separate r.host.
+	if r.state.Host != "" && !r.state.HostPlays {
 		r.host = &presence{connected: false, gen: 1}
 		r.armHostPrune(r.host.gen)
 	}
@@ -237,7 +244,13 @@ func (r *Room) onStart() {
 	for _, p := range r.state.Players {
 		pr := &presence{connected: false, gen: 1}
 		r.present[p.Name] = pr
-		r.armPrune(p.Name, pr.gen)
+		// Losing the playing host ends the room (same as losing a display host),
+		// so it gets a host-prune; every other player gets the usual prune.
+		if r.state.HostPlays && p.Name == r.state.Host {
+			r.armHostPrune(pr.gen)
+		} else {
+			r.armPrune(p.Name, pr.gen)
+		}
 	}
 	if r.state.Phase == PhaseDrawing || r.state.Phase == PhaseGuessing {
 		r.phaseGen++
@@ -306,8 +319,11 @@ func (r *Room) handle(c Command) {
 			r.reap()
 		}
 	case CmdHostPrune:
-		if r.host != nil && !r.host.connected && r.host.gen == c.Gen {
-			r.closeRoom()
+		// The host (display TV or playing host) stayed gone past grace → hand the
+		// room to another player instead of ending it. The captured gen makes a
+		// reconnected host cancel this.
+		if !r.hostConnected() && r.hostGen() == c.Gen {
+			r.hostDeparted()
 		}
 	case CmdConfigure:
 		if c.Player == r.state.Host && r.state.Phase == PhaseLobby && c.Config != nil {
@@ -325,11 +341,9 @@ func (r *Room) handle(c Command) {
 		r.submitGuess(c)
 	case CmdNextPhase:
 		if c.Player == r.state.Host && r.state.Phase == PhaseReveal {
-			if r.state.Round < r.state.TotalRounds {
-				r.beginRound(r.state.Round + 1)
-			} else {
-				r.endGame()
-			}
+			// Reveal → the next drawing to guess in this round, else the next round
+			// (or the end). The host clicks through each featured drawing.
+			r.advanceAfterReveal()
 		}
 	case CmdReturnToLobby:
 		// The host can send everyone back to the lobby from the final scoreboard

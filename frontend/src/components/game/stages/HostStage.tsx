@@ -1,3 +1,4 @@
+import { Confetti } from "@/components/Confetti";
 import { useCountdown } from "@/hooks/use-countdown";
 import type { GameActions } from "@/hooks/use-game-socket";
 import type { Stroke } from "@/lib/protocol";
@@ -6,12 +7,13 @@ import { StrokesView } from "../canvas/StrokesView";
 import { CodeCard } from "../display/CodeCard";
 import { DrawingCarousel } from "../display/DrawingCarousel";
 import { EndedStage } from "../display/EndedStage";
+import { FeatureProgress } from "../display/FeatureProgress";
 import { HOST_CANVAS, HOST_CANVAS_BOX } from "../display/host-canvas";
 import { Panel } from "../display/Panel";
 import { PlayerGrid, Roster } from "../display/PlayerList";
 import { Scoreboard } from "../display/Scoreboard";
 import { Timer } from "../display/Timer";
-import { Brush, Trophy } from "../icons";
+import { Brush, Scribble, Trophy } from "../icons";
 import { HostConfig } from "./HostConfig";
 
 const MIN_PLAYERS = 4;
@@ -80,19 +82,20 @@ function HostEnded({ name, actions }: { name: string; actions: GameActions }) {
 
   return (
     <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
+      {winner && <Confetti />}
       <DrawingCarousel items={items} />
       <div className="flex min-h-0 flex-col gap-4">
-        <div className="card-arcade rise flex shrink-0 flex-col items-center gap-2 p-5 text-center">
+        <div className="ink-block tilt-l rise flex shrink-0 flex-col items-center gap-2 p-5 text-center">
           <span className="trophy-bounce text-foreground">
             <Trophy className="h-10 w-10" />
           </span>
-          <span className="font-display text-2xl font-bold">Game over</span>
+          <span className="font-display text-3xl font-black">Game over</span>
           {winner && (
-            <span className="text-sm text-muted">
-              Winner:{" "}
+            <span className="font-hand text-2xl leading-tight text-muted">
+              winner:{" "}
               <span
                 dir="auto"
-                className="font-display font-bold text-foreground"
+                className="font-display text-xl font-black text-foreground"
               >
                 {winner.name}
               </span>{" "}
@@ -130,7 +133,10 @@ function HostLobby({ actions }: { actions: GameActions }) {
           className="flex-1"
           title="In the lobby"
           aside={
-            <span className="font-mono text-sm text-muted">
+            <span
+              className="sticker px-2.5 py-0.5 font-mono text-sm text-foreground"
+              style={{ "--rot": "2.5deg" } as React.CSSProperties}
+            >
               {players.length} {players.length === 1 ? "player" : "players"}
             </span>
           }
@@ -165,24 +171,28 @@ function HostDrawing() {
   const prompt = useGameStore((s) => s.yourPrompt);
   const endsAt = useGameStore((s) => s.phaseEndsAt);
   const players = useGameStore((s) => s.players);
+  const drawMs = useGameStore((s) => s.drawMs);
   const remaining = useCountdown(endsAt);
   const drawn = players.filter((p) => p.locked).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5">
       <div className="flex shrink-0 items-center justify-between gap-3">
-        <div className="flex flex-col">
-          <span className="font-mono text-xs uppercase tracking-widest text-muted">
-            Everyone is drawing
+        <div className="flex flex-col items-start gap-1.5">
+          <span
+            className="sticker px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-widest text-foreground"
+            style={{ "--rot": "-2deg" } as React.CSSProperties}
+          >
+            ✎ everyone's drawing
           </span>
           <span
             dir="auto"
-            className="font-display text-3xl font-bold sm:text-4xl"
+            className="font-display text-3xl font-black sm:text-4xl"
           >
             {prompt || "…"}
           </span>
         </div>
-        <Timer remaining={remaining} />
+        <Timer remaining={remaining} total={Math.round(drawMs / 1000)} />
       </div>
       <Panel
         className="flex-1"
@@ -203,6 +213,9 @@ function HostGuessing() {
   const drawing = useGameStore((s) => s.currentDrawing);
   const players = useGameStore((s) => s.players);
   const endsAt = useGameStore((s) => s.phaseEndsAt);
+  const guessMs = useGameStore((s) => s.guessMs);
+  const featureIndex = useGameStore((s) => s.featureIndex);
+  const featureCount = useGameStore((s) => s.featureCount);
   const remaining = useCountdown(endsAt);
   const guessed = players.filter((p) => p.hasGuessed).length;
   // The artist is excluded from guessing, so exactly one player never guesses.
@@ -214,12 +227,20 @@ function HostGuessing() {
     <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
       <div className="flex min-h-0 flex-col gap-4">
         <div className="flex shrink-0 items-center justify-between gap-3">
-          <h2 className="font-display text-2xl font-bold sm:text-3xl">
-            Who drew this?
-          </h2>
-          <Timer remaining={remaining} />
+          <div className="flex flex-col gap-2">
+            <h2 className="ink-underline w-fit font-display text-2xl font-black sm:text-3xl">
+              Who drew this?
+            </h2>
+            <FeatureProgress index={featureIndex} count={featureCount} />
+          </div>
+          <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
         </div>
-        <div className={`flex-1 ${HOST_CANVAS_BOX}`}>
+        {/* taped up like a poster; keyed by which drawing is on show so each new
+            featured drawing wipes up into focus instead of swapping in place */}
+        <div
+          key={featureIndex}
+          className={`tape reveal-clip flex-1 ${HOST_CANVAS_BOX}`}
+        >
           <StrokesView strokes={drawing} className={HOST_CANVAS} />
         </div>
       </div>
@@ -245,7 +266,23 @@ function HostReveal({ actions }: { actions: GameActions }) {
   const gallery = useGameStore((s) => s.gallery);
   const round = useGameStore((s) => s.round);
   const totalRounds = useGameStore((s) => s.totalRounds);
+  const featureIndex = useGameStore((s) => s.featureIndex);
+  const featureCount = useGameStore((s) => s.featureCount);
+  // Artists already revealed this round — only their names are shown in the
+  // gallery while drawings remain to be guessed, so later guesses aren't spoiled.
+  const roundFeatured = useGameStore((s) => s.roundFeatured);
+  // On the round's final reveal there's nothing left to guess, so every drawing
+  // gets attributed — no drawing is left anonymous once the round is done.
+  const roundComplete = featureCount > 0 && featureIndex >= featureCount;
+  // More drawings still to guess this round → the host moves to the next one;
+  // otherwise it's the last round's end, or simply the next round.
+  const moreDrawings = featureIndex < featureCount;
   const isLast = round >= totalRounds;
+  const nextLabel = moreDrawings
+    ? "Next drawing →"
+    : isLast
+      ? "See final results →"
+      : "Next round →";
   const correct = players.filter((p) => p.correct);
   // A round where nobody drew anything skips guessing and lands here with no
   // artist — show a "nobody drew" message instead of a blank canvas.
@@ -258,11 +295,11 @@ function HostReveal({ actions }: { actions: GameActions }) {
           className={`flex flex-col items-center justify-center gap-3 p-8 text-center ${HOST_CANVAS_BOX}`}
         >
           <Brush className="h-12 w-12 text-muted" />
-          <p className="font-display text-2xl font-bold">
+          <p className="font-display text-2xl font-black">
             Nobody drew anything
           </p>
-          <p className="text-sm text-muted">
-            Everyone ran out of time or left the canvas blank.
+          <p className="font-hand text-xl text-muted">
+            everyone ran out of time or left the canvas blank.
           </p>
         </div>
       ) : (
@@ -270,38 +307,58 @@ function HostReveal({ actions }: { actions: GameActions }) {
         // fit every gallery tile — without it, a full room's worth of drawings
         // would widen the track and shove the leaderboard off the screen edge.
         <div className="flex min-h-0 min-w-0 flex-col gap-3">
-          <div className={`min-h-0 flex-1 ${HOST_CANVAS_BOX}`}>
+          <div
+            key={featureIndex}
+            className={`tape reveal-clip min-h-0 flex-1 ${HOST_CANVAS_BOX}`}
+          >
             <StrokesView strokes={drawing} className={HOST_CANVAS} />
           </div>
           {Object.keys(gallery).length > 0 && (
             <div className="min-w-0 shrink-0">
-              <span className="font-mono text-xs uppercase tracking-widest text-muted">
-                Everyone's drawings
+              <span className="font-hand text-xl text-muted">
+                everyone's drawings
               </span>
-              {/* Bounded to the column and scrolled horizontally: any number of
-                  drawings (up to a full room) stays fully reachable, none clipped. */}
-              <ul className="mt-2 flex snap-x gap-3 overflow-x-auto overflow-y-hidden pb-2">
-                {Object.entries(gallery).map(([artist, strokes]) => (
-                  <li
-                    key={artist}
-                    className={`shrink-0 snap-start rounded-xl border-2 p-1.5 ${
-                      artist === reveal?.artist
-                        ? "border-foreground"
-                        : "border-border"
-                    }`}
-                  >
-                    <StrokesView
-                      strokes={strokes}
-                      className="aspect-4/3 w-32 rounded-lg border border-border bg-surface"
-                    />
-                    <span
-                      dir="auto"
-                      className="mt-1 block max-w-32 truncate text-center text-xs font-semibold"
+              {/* Pinned-up polaroids: each tilts a touch; the featured one inks
+                  its frame solid. A drawing only shows its artist once it has been
+                  guessed this round — the rest keep the name scribbled out so the
+                  later guesses stay a mystery. Scrolled horizontally so a full
+                  room fits. */}
+              <ul className="mt-2 flex snap-x gap-3 overflow-x-auto overflow-y-hidden px-1 pb-3 pt-1">
+                {Object.entries(gallery).map(([artist, strokes], i) => {
+                  const isFeatured = artist === reveal?.artist;
+                  const revealed =
+                    roundComplete ||
+                    isFeatured ||
+                    roundFeatured.includes(artist);
+                  return (
+                    <li
+                      key={artist}
+                      className={`shrink-0 snap-start rounded-lg border-2 bg-surface p-1.5 transition-transform ${
+                        isFeatured
+                          ? "border-foreground shadow-[4px_5px_0_0_var(--ink-edge)]"
+                          : "border-border"
+                      } ${i % 2 === 0 ? "rotate-2" : "-rotate-2"}`}
                     >
-                      {artist}
-                    </span>
-                  </li>
-                ))}
+                      <StrokesView
+                        strokes={strokes}
+                        className="aspect-4/3 w-32 rounded border border-border bg-surface"
+                      />
+                      {revealed ? (
+                        <span
+                          dir="auto"
+                          className="mt-1 block max-w-32 truncate text-center font-hand text-lg leading-none"
+                        >
+                          {artist}
+                        </span>
+                      ) : (
+                        <Scribble
+                          seed={artist}
+                          className="mx-auto mt-1.5 block h-4 w-[7rem] text-muted"
+                        />
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -309,36 +366,45 @@ function HostReveal({ actions }: { actions: GameActions }) {
       )}
 
       <div className="flex min-h-0 min-w-0 flex-col gap-4">
-        <div className="card-arcade rise flex shrink-0 flex-col gap-1 p-5 text-center">
+        <FeatureProgress
+          index={featureIndex}
+          count={featureCount}
+          className="shrink-0 justify-center"
+        />
+        <div className="ink-block tilt-r rise flex shrink-0 flex-col gap-1 p-5 text-center">
           {noArtist ? (
             <>
-              <span className="font-display text-2xl font-bold">
+              <span className="font-display text-2xl font-black">
                 No drawing this round
               </span>
               {reveal?.prompt && (
-                <span dir="auto" className="text-sm text-muted">
+                <span dir="auto" className="font-hand text-xl text-muted">
                   the word was: {reveal.prompt}
                 </span>
               )}
             </>
           ) : (
             <>
-              <span className="font-mono text-xs uppercase tracking-widest text-muted">
-                It was drawn by
+              <span className="font-hand text-xl text-muted">
+                it was drawn by
               </span>
-              <span dir="auto" className="font-display text-2xl font-bold">
+              <span dir="auto" className="font-display text-3xl font-black">
                 {reveal?.artist ?? "—"}
               </span>
               {reveal?.prompt && (
-                <span dir="auto" className="text-sm text-muted">
-                  prompt: {reveal.prompt}
+                <span
+                  dir="auto"
+                  className="sticker mx-auto w-fit px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted"
+                  style={{ "--rot": "-2deg" } as React.CSSProperties}
+                >
+                  word: {reveal.prompt}
                 </span>
               )}
-              <span className="mt-2 text-sm">
+              <span className="mt-2 font-hand text-xl">
                 {correct.length === 0
-                  ? "Nobody guessed right!"
+                  ? "nobody guessed right!"
                   : `${correct.length} guessed it: `}
-                <span dir="auto" className="font-semibold">
+                <span dir="auto" className="font-display text-base font-black">
                   {correct.map((p) => p.name).join(", ")}
                 </span>
               </span>
@@ -355,7 +421,7 @@ function HostReveal({ actions }: { actions: GameActions }) {
           className="btn-key w-full shrink-0 px-6 py-4 text-lg"
           onClick={actions.nextPhase}
         >
-          {isLast ? "See final results →" : "Next round →"}
+          {nextLabel}
         </button>
       </div>
     </div>
