@@ -347,6 +347,24 @@ describe("stage split", () => {
     expect(container.querySelector("canvas.opacity-70")).not.toBeNull();
   });
 
+  it("frenzy curtain covers the flipped doodle grid", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "frenzy",
+      // flipped layout drives the on-device grid; frenzy effects layer over it
+      target: "bob",
+      youAreTarget: false,
+      players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
+      pool: [
+        { id: "d1", strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }] },
+        { id: "d2", strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }] },
+      ],
+      yourEffects: [{ kind: "curtain", endsAt: Date.now() + 5000, from: "bob" }],
+    });
+    const { container } = render(<PlayerStage name="ann" actions={noopActions} />);
+    expect(container.querySelector('[data-effect="curtain"]')).not.toBeNull();
+  });
+
   it("frenzy tray toasts incoming effects and still toasts after a round reset", () => {
     useGameStore.setState({
       phase: "drawing",
