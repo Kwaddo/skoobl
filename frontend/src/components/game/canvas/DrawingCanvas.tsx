@@ -16,7 +16,8 @@ import {
   drawStrokes,
   PALETTE,
 } from "@/lib/canvas";
-import type { Point, Stroke } from "@/lib/protocol";
+import type { Point, Powerup, Stroke } from "@/lib/protocol";
+import { EffectLayer } from "../display/EffectLayer";
 import { Brush, Bucket, Trash, Undo } from "../icons";
 
 // DrawingCanvas is the interactive drawing surface plus its toolbar (color
@@ -28,11 +29,13 @@ import { Brush, Bucket, Trash, Undo } from "../icons";
 // column when short — so it's never stranded at the bottom of the page.
 export function DrawingCanvas({
   disabled = false,
+  effects = new Set<Powerup>(),
   onChange,
   onStrokeEnd,
   footer,
 }: {
   disabled?: boolean;
+  effects?: Set<Powerup>;
   onChange?: (strokes: Stroke[]) => void;
   onStrokeEnd?: (strokes: Stroke[]) => void;
   footer?: React.ReactNode;
@@ -47,6 +50,8 @@ export function DrawingCanvas({
   const colorRef = useRef<HTMLDivElement>(null);
   const penRef = useRef<HTMLDivElement>(null);
   const drawingRef = useRef(false);
+  const crampLocked = effects.has("cramp");
+  const inputDisabled = disabled || crampLocked;
 
   useEffect(() => {
     const ctx = ref.current?.getContext("2d");
@@ -70,7 +75,7 @@ export function DrawingCanvas({
   }, []);
 
   const start = (e: PointerEvent) => {
-    if (disabled || !e.isPrimary) return;
+    if (inputDisabled || !e.isPrimary) return;
     const p = toCanvas(e);
     if (tool === "fill") {
       // A fill is a complete op on press: append the fill stroke and draft it.
@@ -85,7 +90,7 @@ export function DrawingCanvas({
   };
 
   const move = (e: PointerEvent) => {
-    if (disabled || !drawingRef.current || !e.isPrimary) return;
+    if (inputDisabled || !drawingRef.current || !e.isPrimary) return;
     const p = toCanvas(e);
     setStrokes((prev) => {
       if (prev.length === 0) return prev;
@@ -113,19 +118,24 @@ export function DrawingCanvas({
           large as the phone allows; short/landscape, it claims the width beside
           the tools. flex (not grid) makes max-h-full reliably bound the canvas. */}
       <div className="flex min-h-0 flex-1 items-center justify-center lg:max-w-176 lg:flex-initial">
-        <canvas
-          ref={ref}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          onPointerDown={start}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerLeave={end}
-          onPointerCancel={end}
-          className={`max-h-full max-w-full touch-none select-none rounded-2xl border-2 border-border bg-surface lg:max-h-[68vh] ${
-            disabled ? "opacity-70" : "cursor-crosshair"
-          }`}
-        />
+        <EffectLayer
+          effects={effects}
+          className="flex h-full w-full items-center justify-center"
+        >
+          <canvas
+            ref={ref}
+            width={CANVAS_W}
+            height={CANVAS_H}
+            onPointerDown={start}
+            onPointerMove={move}
+            onPointerUp={end}
+            onPointerLeave={end}
+            onPointerCancel={end}
+            className={`max-h-full max-w-full touch-none select-none rounded-2xl border-2 border-border bg-surface lg:max-h-[68vh] ${
+              inputDisabled ? "opacity-70" : "cursor-crosshair"
+            }`}
+          />
+        </EffectLayer>
       </div>
 
       {!disabled && (
