@@ -1605,6 +1605,101 @@ func TestRevealedArtistsHiddenFromGuessOptions(t *testing.T) {
 	}
 }
 
+func flippedRoomInGuessing(t *testing.T, names ...string) *Room {
+	t.Helper()
+	r := syncRoom(t, names...)
+	r.state.Mode = ModeFlipped // configured in the lobby; set directly for the unit test
+	for _, n := range names {
+		draft(r, n)
+	}
+	r.advance() // drawing timer → flipped guessing
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing", r.state.Phase)
+	}
+	return r
+}
+
+func TestFlippedGuessingView(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	target := r.state.Featured
+
+	guesser := "alice"
+	if target == "alice" {
+		guesser = "bob"
+	}
+	v := r.state.viewFor(guesser, r.present)
+	if v.Mode != ModeFlipped {
+		t.Fatalf("view mode = %q, want flipped", v.Mode)
+	}
+	if v.Target != target {
+		t.Fatalf("target = %q, want %q", v.Target, target)
+	}
+	if v.YouAreTarget {
+		t.Fatal("a non-target guesser must not see YouAreTarget")
+	}
+	if len(v.Pool) != 4 {
+		t.Fatalf("pool size = %d, want 4 (all drew, none revealed)", len(v.Pool))
+	}
+	if v.CurrentDrawing != nil {
+		t.Fatal("flipped guessing must not send a single currentDrawing")
+	}
+	for _, d := range v.Pool {
+		if d.ID == "" {
+			t.Fatal("pool drawing has no id")
+		}
+		for _, n := range names { // an id must never be a player name
+			if d.ID == n {
+				t.Fatalf("pool id %q leaks a player name", d.ID)
+			}
+		}
+	}
+
+	tv := r.state.viewFor(target, r.present)
+	if !tv.YouAreTarget {
+		t.Fatal("the target should see YouAreTarget")
+	}
+}
+
+func TestFlippedPoolDropsRevealedTarget(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	first := r.state.Featured
+	firstID := r.state.DrawIDs[first]
+
+	idsBefore := map[string]string{}
+	for k, v := range r.state.DrawIDs {
+		idsBefore[k] = v
+	}
+
+	r.beginReveal()
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"}) // → second feature
+
+	for k, v := range r.state.DrawIDs {
+		if idsBefore[k] != v {
+			t.Fatalf("draw id for %q changed across features (%q→%q)", k, idsBefore[k], v)
+		}
+	}
+
+	second := r.state.Featured
+	guesser := ""
+	for _, n := range names {
+		if n != first && n != second {
+			guesser = n
+			break
+		}
+	}
+	v := r.state.viewFor(guesser, r.present)
+	if len(v.Pool) != 3 {
+		t.Fatalf("pool size = %d, want 3 (first target removed)", len(v.Pool))
+	}
+	for _, d := range v.Pool {
+		if d.ID == firstID {
+			t.Fatal("a revealed target's doodle is still in the pool")
+		}
+	}
+}
+
 func TestEmptyLockInIsNotADrawing(t *testing.T) {
 	r := syncRoom(t, "alice", "bob", "carol", "dave")
 	draft(r, "alice") // one real drawing

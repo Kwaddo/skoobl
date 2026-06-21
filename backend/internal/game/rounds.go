@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"time"
 )
@@ -40,6 +41,7 @@ func (r *Room) beginRound(n int) {
 	r.state.RoundFeatured = nil
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
+	r.state.DrawIDs = nil
 	r.state.Prompt = r.pickPrompt()
 	r.startPhase(PhaseDrawing, r.state.DrawMs)
 }
@@ -122,6 +124,9 @@ func (r *Room) beginGuessing() {
 		r.beginReveal()
 		return
 	}
+	if r.state.Mode == ModeFlipped {
+		r.assignDrawIDs()
+	}
 	// Keep at least two drawers off-screen each round. Once an artist is revealed
 	// they're struck from the remaining drawings' guess options (see PlayerStage),
 	// so featuring nearly every drawer would make the last "who drew it?" a forced
@@ -179,6 +184,31 @@ func (r *Room) advanceRound() {
 		return
 	}
 	r.endGame()
+}
+
+// assignDrawIDs gives every drawer this round a stable opaque id, used by flipped
+// mode to show drawings without revealing who drew which. Regenerated each round
+// (cleared in beginRound), so the same drawing keeps its id across a round's
+// features but not across rounds.
+func (r *Room) assignDrawIDs() {
+	ids := make(map[string]string, len(r.state.Players))
+	used := map[string]bool{}
+	for _, p := range r.state.Players {
+		if len(r.state.Drawings[p.Name]) == 0 {
+			continue
+		}
+		id := randDrawID()
+		for used[id] {
+			id = randDrawID()
+		}
+		used[id] = true
+		ids[p.Name] = id
+	}
+	r.state.DrawIDs = ids
+}
+
+func randDrawID() string {
+	return fmt.Sprintf("d%08x", rand.Uint32())
 }
 
 // drawerCount returns how many players drew something non-empty this round. An
