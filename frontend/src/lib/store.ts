@@ -1,12 +1,14 @@
 import { create } from "zustand";
 import { syncClock } from "./clock";
 import type {
+  ActiveEffect,
   GameMode,
   GameState,
   Language,
   Phase,
   Player,
   PoolDrawing,
+  Powerup,
   Reveal,
   Stroke,
 } from "./protocol";
@@ -60,6 +62,8 @@ interface GameStore {
   revealed: string[];
   roundFeatured: string[];
   closed: boolean;
+  yourPowerups: Powerup[];
+  yourEffects: ActiveEffect[];
   notices: Notice[];
   self: string;
   error: string | null;
@@ -105,6 +109,8 @@ const initial = {
   revealed: [] as string[],
   roundFeatured: [] as string[],
   closed: false,
+  yourPowerups: [] as Powerup[],
+  yourEffects: [] as ActiveEffect[],
   notices: [] as Notice[],
   self: "",
   error: null as string | null,
@@ -181,6 +187,8 @@ export const useGameStore = create<GameStore>((set) => ({
         revealed: s.revealed ?? [],
         roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,
+        yourPowerups: s.yourPowerups ?? [],
+        yourEffects: s.yourEffects ?? [],
         notices,
       };
     }),

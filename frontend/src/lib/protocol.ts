@@ -30,6 +30,23 @@ export interface Stroke {
   fill?: boolean;
 }
 
+// A Frenzy sabotage item.
+export type Powerup =
+  | "fog"
+  | "lights"
+  | "flip"
+  | "cramp"
+  | "squint"
+  | "curtain"
+  | "shuffle";
+
+// An active effect inflicted on this client.
+export interface ActiveEffect {
+  kind: Powerup;
+  endsAt: number;
+  from: string;
+}
+
 // One anonymized candidate doodle in flipped guessing.
 export interface PoolDrawing {
   id: string;
@@ -96,6 +113,9 @@ export interface GameState {
   roundFeatured?: string[];
   // Final frame sent when the host leaves: the room is gone, kick to the menu.
   closed?: boolean;
+  // Frenzy-mode recipient-specific fields.
+  yourPowerups?: Powerup[];
+  yourEffects?: ActiveEffect[];
 }
 
 // GameConfig is the host's lobby setup sent via the "configure" event.
