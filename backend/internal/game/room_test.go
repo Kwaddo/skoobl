@@ -1499,8 +1499,9 @@ func TestRoundGuessesMultipleDistinctDrawings(t *testing.T) {
 }
 
 func TestFeatureCountCappedByDrawers(t *testing.T) {
-	// Six players would target three drawings, but only two actually draw — so the
-	// round can guess at most those two.
+	// Six players would target three drawings, but only two actually draw. With a
+	// two-drawer margin (so a revealed artist never forces the next guess), a
+	// two-drawer round guesses just one drawing.
 	r := syncRoom(t, "p1", "p2", "p3", "p4", "p5", "p6")
 	if got := guessesForPlayers(len(r.state.Players)); got != 3 {
 		t.Fatalf("guessesForPlayers(6) = %d, want 3 (precondition)", got)
@@ -1508,8 +1509,59 @@ func TestFeatureCountCappedByDrawers(t *testing.T) {
 	draft(r, "p1")
 	draft(r, "p2")
 	r.advance()
+	if r.state.FeatureCount != 1 {
+		t.Fatalf("featureCount = %d, want 1 (two drawers, two kept off-screen)", r.state.FeatureCount)
+	}
+}
+
+func TestFeatureCountLeavesTwoDrawerMargin(t *testing.T) {
+	// Eight players target three drawings, but only four draw. The two-drawer
+	// margin caps the round at two so the second (final) drawing still has real
+	// options once the first artist is struck from the choices.
+	r := syncRoom(t, "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8")
+	if got := guessesForPlayers(len(r.state.Players)); got != 3 {
+		t.Fatalf("guessesForPlayers(8) = %d, want 3 (precondition)", got)
+	}
+	for _, n := range []string{"p1", "p2", "p3", "p4"} {
+		draft(r, n)
+	}
+	r.advance()
 	if r.state.FeatureCount != 2 {
-		t.Fatalf("featureCount = %d, want 2 (capped by the two who drew)", r.state.FeatureCount)
+		t.Fatalf("featureCount = %d, want 2 (four drawers, two kept off-screen)", r.state.FeatureCount)
+	}
+}
+
+func TestRevealedArtistsHiddenFromGuessOptions(t *testing.T) {
+	// A 4-player round guesses two drawings. While the second is up for guessing,
+	// the first artist must be in `Revealed` (struck from the options) and the
+	// second — still secret — must not be.
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		draft(r, n)
+	}
+	r.advance() // → guessing the first drawing
+	first := r.state.Featured
+
+	r.beginReveal()
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"}) // → guessing the second drawing
+	second := r.state.Featured
+
+	// Pick a guesser who is neither artist so the view is a real guesser's.
+	guesser := ""
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		if n != first && n != second {
+			guesser = n
+			break
+		}
+	}
+	v := r.state.viewFor(guesser, r.present)
+	if len(v.Revealed) != 1 || v.Revealed[0] != first {
+		t.Fatalf("revealed = %v, want exactly [%q]", v.Revealed, first)
+	}
+	for _, n := range v.Revealed {
+		if n == second {
+			t.Fatalf("revealed leaked the current (secret) artist %q", second)
+		}
 	}
 }
 

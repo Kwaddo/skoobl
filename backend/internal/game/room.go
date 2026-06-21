@@ -141,6 +141,12 @@ type Room struct {
 	host     *presence // the single host-display (spectator); nil until one joins
 	phaseGen int       // bumped on every phase change; stale advance timers self-cancel
 
+	// promptDeck is the current game's prompt pool, shuffled, drawn from the end
+	// one word per round so no word repeats until the deck is exhausted (then it
+	// reshuffles). In-memory only — not persisted, so a mid-game resume just
+	// reshuffles, which is harmless.
+	promptDeck []string
+
 	grace      time.Duration
 	onReap     func()
 	emptyTimer *time.Timer

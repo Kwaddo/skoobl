@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Segmented } from "@/components/Segmented";
 import type { GameActions } from "@/hooks/use-game-socket";
+import { getSaveGalleryPref, setSaveGalleryPref } from "@/lib/history";
 import { useGameStore } from "@/lib/store";
 
 const DRAW_TIME_OPTIONS = [30, 60, 80, 120];
@@ -37,6 +38,9 @@ export function HostConfig({ actions }: { actions: GameActions }) {
   );
   const [mode, setMode] = useState<CategoryMode>("random");
   const [categories, setCategories] = useState("");
+  // Device-local pref (not a game setting): also archive every player's drawing
+  // to THIS device's history. Persisted to localStorage, never sent to the server.
+  const [saveGallery, setSaveGallery] = useState(getSaveGalleryPref);
 
   const sync = useCallback(
     (
@@ -137,6 +141,21 @@ export function HostConfig({ actions }: { actions: GameActions }) {
           onChange={(v) => {
             setMode(v);
             sync({ mode: v });
+          }}
+        />
+      </Row>
+
+      <Row label="Save everyone's art here">
+        <Segmented
+          value={saveGallery ? "on" : "off"}
+          options={[
+            { value: "off" as const, label: "Off" },
+            { value: "on" as const, label: "On" },
+          ]}
+          onChange={(v) => {
+            const on = v === "on";
+            setSaveGallery(on);
+            setSaveGalleryPref(on);
           }}
         />
       </Row>

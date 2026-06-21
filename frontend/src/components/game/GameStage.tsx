@@ -1,5 +1,6 @@
 import { Navigate, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { useDrawingHistory } from "@/hooks/use-drawing-history";
 import { CONNECTION_ERROR, useGameSocket } from "@/hooks/use-game-socket";
 import { setFlash } from "@/lib/flash";
 import { recallHostPlay, recallName } from "@/lib/identity";
@@ -96,6 +97,9 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
     useGameStore.getState().setError(null);
     navigate({ to: "/" });
   }, [recoverable, error, screen, code, navigate]);
+
+  // Persist this device's drawings to local history as the game plays.
+  useDrawingHistory(code, name ?? "");
 
   if (!name) return <Navigate to="/" />;
   if (error === CONNECTION_ERROR) return <ErrorPanel message={error} />;

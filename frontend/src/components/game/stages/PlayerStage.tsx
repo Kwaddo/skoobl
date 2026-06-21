@@ -183,11 +183,16 @@ export function PlayerGuessing({
   // shown right here on each player's device instead of "look up at the screen".
   const hostPlays = useGameStore((s) => s.hostPlays);
   const drawing = useGameStore((s) => s.currentDrawing);
+  const revealed = useGameStore((s) => s.revealed);
   const remaining = useCountdown(endsAt);
 
   // Only players who actually drew something this round can be the artist, so
-  // they're the only ones worth voting for (non-drawers are excluded).
-  const options = players.filter((p) => p.name !== name && p.hasDrawn);
+  // they're the only ones worth voting for (non-drawers are excluded). Artists
+  // already revealed earlier this round are dropped too — each player draws once,
+  // so a revealed artist can't be behind the drawing on show.
+  const options = players.filter(
+    (p) => p.name !== name && p.hasDrawn && !revealed.includes(p.name),
+  );
   // Play-along rooms show the drawing inline, so desktop gets a two-pane split
   // (drawing beside the guess list); otherwise it's a single centred column.
   const showDrawing = hostPlays && !youAreArtist;

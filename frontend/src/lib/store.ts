@@ -51,6 +51,7 @@ interface GameStore {
   youAreArtist: boolean;
   yourGuess: string;
   reveal: Reveal | null;
+  revealed: string[];
   roundFeatured: string[];
   closed: boolean;
   notices: Notice[];
@@ -91,6 +92,7 @@ const initial = {
   youAreArtist: false,
   yourGuess: "",
   reveal: null as Reveal | null,
+  revealed: [] as string[],
   roundFeatured: [] as string[],
   closed: false,
   notices: [] as Notice[],
@@ -162,6 +164,7 @@ export const useGameStore = create<GameStore>((set) => ({
         youAreArtist: s.youAreArtist ?? false,
         yourGuess: s.yourGuess ?? "",
         reveal: s.reveal ?? null,
+        revealed: s.revealed ?? [],
         roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,
         notices,

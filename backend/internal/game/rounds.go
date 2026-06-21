@@ -22,6 +22,7 @@ func (r *Room) startGame() {
 		r.state.Players[i].Score = 0
 	}
 	r.state.FeaturedPast = nil
+	r.promptDeck = nil // fresh shuffle for the new game
 	r.beginRound(1)
 }
 
@@ -58,8 +59,10 @@ func guessesForPlayers(players int) int {
 }
 
 // pickPrompt chooses the single word everyone draws this round, from the custom
-// pool if configured, else the built-in pool for the chosen language. It avoids
-// immediately repeating the previous round's word when the pool allows.
+// pool if configured, else the built-in pool for the chosen language. Words are
+// drawn from a shuffled deck (promptDeck) so none repeats until the whole pool is
+// used, then the deck reshuffles. The reshuffle never repeats the previous word
+// back-to-back.
 func (r *Room) pickPrompt() string {
 	pool := r.state.Categories
 	if len(pool) == 0 {
@@ -71,13 +74,27 @@ func (r *Room) pickPrompt() string {
 	case 1:
 		return pool[0]
 	}
-	prev := r.state.Prompt
-	for i := 0; i < 5; i++ {
-		if w := pool[rand.IntN(len(pool))]; w != prev {
-			return w
-		}
+	if len(r.promptDeck) == 0 {
+		r.promptDeck = newPromptDeck(pool, r.state.Prompt)
 	}
-	return pool[rand.IntN(len(pool))]
+	// Draw from the end (cheap slice trim).
+	last := len(r.promptDeck) - 1
+	w := r.promptDeck[last]
+	r.promptDeck = r.promptDeck[:last]
+	return w
+}
+
+// newPromptDeck returns pool shuffled into a fresh deck. Words are drawn from the
+// end, so it ensures the last element (the next pick) isn't `avoid` — the
+// previous round's prompt — keeping a reshuffle from repeating a word back-to-back.
+func newPromptDeck(pool []string, avoid string) []string {
+	deck := make([]string, len(pool))
+	copy(deck, pool)
+	rand.Shuffle(len(deck), func(i, j int) { deck[i], deck[j] = deck[j], deck[i] })
+	if n := len(deck); n > 1 && deck[n-1] == avoid {
+		deck[n-1], deck[0] = deck[0], deck[n-1]
+	}
+	return deck
 }
 
 // advance is the timer-driven transition: drawing → guessing → reveal. Reveal is
@@ -104,7 +121,16 @@ func (r *Room) beginGuessing() {
 		r.beginReveal()
 		return
 	}
-	r.state.FeatureCount = min(guessesForPlayers(len(r.state.Players)), drew)
+	// Keep at least two drawers off-screen each round. Once an artist is revealed
+	// they're struck from the remaining drawings' guess options (see PlayerStage),
+	// so featuring nearly every drawer would make the last "who drew it?" a forced
+	// single answer. Leaving a two-drawer margin keeps every guess a real choice.
+	// Floored at one so any round with a drawing still guesses at least once.
+	maxByDrawers := drew - 2
+	if maxByDrawers < 1 {
+		maxByDrawers = 1
+	}
+	r.state.FeatureCount = min(guessesForPlayers(len(r.state.Players)), maxByDrawers)
 	r.state.FeatureIndex = 0
 	r.beginNextFeature()
 }
