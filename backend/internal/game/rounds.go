@@ -223,6 +223,14 @@ func (r *Room) pickFeatured() string {
 // shrinks with each player who identifies them. Scores are computed before
 // startPhase resets the clock, so speedScore reads the live guess window.
 func (r *Room) beginReveal() {
+	if r.state.Featured != "" && r.state.playerIndex(r.state.Featured) < 0 {
+		// The featured artist left mid-guess. Don't reveal a player who's no
+		// longer here (and don't score guesses for a spoiled drawing) — move on
+		// to the next drawing this round, or end the round if none remain.
+		r.state.Featured = ""
+		r.advanceAfterReveal()
+		return
+	}
 	var deltas map[string]int
 	if r.state.Featured != "" {
 		deltas = map[string]int{}

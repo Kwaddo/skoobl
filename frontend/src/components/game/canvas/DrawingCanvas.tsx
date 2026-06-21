@@ -105,13 +105,14 @@ export function DrawingCanvas({
   return (
     // Fills its slot; the canvas scales to fit. When the viewport is short, the
     // toolbar moves to a column beside the canvas (instead of below, where it'd
-    // get cut off) so drawing always has room. ↓ tuned at 760px tall.
-    <div className="flex h-full min-h-0 flex-col items-stretch justify-center gap-3 short:flex-row short:justify-center short:gap-4">
+    // get cut off) so drawing always has room. ↓ tuned at 760px tall. On desktop
+    // (lg+) the same side-by-side layout kicks in so the canvas gets real width.
+    <div className="flex h-full min-h-0 flex-col items-stretch justify-center gap-3 short:flex-row short:justify-center short:gap-4 lg:flex-row lg:justify-center lg:gap-6">
       {/* Canvas area grows to fill the leftover space (flex-1) in both layouts:
           stacked, it claims the height above the tools so the canvas scales up as
           large as the phone allows; short/landscape, it claims the width beside
           the tools. flex (not grid) makes max-h-full reliably bound the canvas. */}
-      <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div className="flex min-h-0 flex-1 items-center justify-center lg:max-w-176 lg:flex-initial">
         <canvas
           ref={ref}
           width={CANVAS_W}
@@ -121,14 +122,14 @@ export function DrawingCanvas({
           onPointerUp={end}
           onPointerLeave={end}
           onPointerCancel={end}
-          className={`max-h-full max-w-full touch-none select-none rounded-2xl border-2 border-border bg-surface ${
+          className={`max-h-full max-w-full touch-none select-none rounded-2xl border-2 border-border bg-surface lg:max-h-[68vh] ${
             disabled ? "opacity-70" : "cursor-crosshair"
           }`}
         />
       </div>
 
       {!disabled && (
-        <div className="flex shrink-0 flex-col gap-3 short:w-44 short:justify-center short:overflow-y-auto">
+        <div className="flex shrink-0 flex-col gap-3 short:w-44 short:justify-center short:overflow-y-auto lg:w-60 lg:justify-center lg:overflow-y-auto lg:px-1.5">
           {/* One wrapping cluster: it reflows to fit any width (a row under the
               canvas when tall, a narrow column beside it when short) so no
               control is ever clipped. Every control is a fixed 36px square. */}

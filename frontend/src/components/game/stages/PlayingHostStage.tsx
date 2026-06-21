@@ -34,7 +34,11 @@ export function PlayingHostStage({
       return <PlayerReveal name={name} actions={actions} isHost />;
     case "ended":
       return (
-        <EndedStage name={name} onPlayAgain={actions.returnToLobby} screen="host" />
+        <EndedStage
+          name={name}
+          onPlayAgain={actions.returnToLobby}
+          screen="host"
+        />
       );
     default:
       return null;
@@ -55,15 +59,22 @@ function PlayingHostLobby({ actions }: { actions: GameActions }) {
       >
         ✎ you're hosting &amp; playing
       </span>
-      {/* one scroll for the share code, settings and roster; Start stays pinned */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-        <CodeCard code={code} />
-        {/* plain wrapper gives HostConfig an indefinite height so it sizes to its
-            content here instead of trying to fill the column like on the TV */}
-        <div className="shrink-0">
-          <HostConfig actions={actions} />
+      {/* Mobile: one scroll column (code, settings, roster). Desktop: two columns
+          — code + settings on the left, roster on the right — each scrolling on
+          its own. Start stays pinned below either way. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 lg:grid lg:grid-cols-2 lg:gap-6 lg:overflow-hidden">
+        {/* lg padding leaves room for each card's hard offset shadow (≈7px right
+            /down) and the QR's tape strip (≈11px up) so the scroll clip doesn't
+            shear them */}
+        <div className="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:px-2 lg:pt-3 lg:pb-2">
+          <CodeCard code={code} />
+          {/* plain wrapper gives HostConfig an indefinite height so it sizes to its
+              content here instead of trying to fill the column like on the TV */}
+          <div className="shrink-0">
+            <HostConfig actions={actions} />
+          </div>
         </div>
-        <div className="flex shrink-0 flex-col">
+        <div className="flex shrink-0 flex-col lg:min-h-0 lg:shrink lg:overflow-y-auto lg:px-2 lg:pt-2 lg:pb-2">
           <div className="mb-2 flex items-baseline justify-between">
             <h2 className="ink-underline font-display text-xl font-black">
               Players

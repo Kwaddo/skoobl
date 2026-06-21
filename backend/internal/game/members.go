@@ -225,6 +225,7 @@ func (r *Room) hostDeparted() {
 	if i := r.state.playerIndex(old); i >= 0 {
 		r.state.Players = append(r.state.Players[:i], r.state.Players[i+1:]...)
 	}
+	r.clearRoundData(old)
 
 	// Promote the longest-standing connected player.
 	newHost := ""
@@ -281,6 +282,7 @@ func (r *Room) removePlayer(name string) {
 	if i := r.state.playerIndex(name); i >= 0 {
 		r.state.Players = append(r.state.Players[:i], r.state.Players[i+1:]...)
 	}
+	r.clearRoundData(name)
 	if len(r.state.Players) == 0 && !r.hostConnected() {
 		r.reap()
 		return
@@ -302,6 +304,17 @@ func (r *Room) removePlayer(name string) {
 			r.beginReveal()
 		}
 	}
+}
+
+// clearRoundData drops a departed player's per-round artifacts: their drawing
+// (so it can't surface in the host gallery or be featured), their lock-in, and
+// their guess (so a gone correct-guesser can't inflate the artist pot or be
+// scored). delete on a nil map is a no-op, so this is safe between rounds.
+func (r *Room) clearRoundData(name string) {
+	delete(r.state.Drawings, name)
+	delete(r.state.Locked, name)
+	delete(r.state.Guesses, name)
+	delete(r.state.GuessTimes, name)
 }
 
 // reap shuts the room down: tell the hub to drop it, then stop the loop.

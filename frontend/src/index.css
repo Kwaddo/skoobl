@@ -4,12 +4,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* `short:` applies when the viewport is too short for the stacked drawing layout
-   *and* wide enough to put the tools beside the canvas — i.e. a short, landscape
-   window. The landscape gate (min-aspect-ratio) keeps it from firing on phones in
-   portrait, whose height can dip under 760px (small screens, browser chrome) yet
-   still want the big stacked canvas above the palette, not a squished side-by-side. */
-@custom-variant short (@media (max-height: 760px) and (min-aspect-ratio: 1/1));
+/* `short:` is the landscape-PHONE drawing layout: too short for the stacked
+   canvas, wide enough to sit the tools beside it. The min-aspect-ratio gate keeps
+   it off portrait phones (whose height can dip under 760px yet still want the big
+   stacked canvas). The max-width gate keeps it off desktops — a short, wide laptop
+   window is a desktop and must be governed by `lg:` alone, not collide with it
+   (short: is registered after lg and would otherwise win, forcing phone widths). */
+@custom-variant short (@media (max-height: 760px) and (min-aspect-ratio: 1/1) and (max-width: 1023px));
 
 /* ── skoobl: "ink & paper" ───────────────────────────────────────────────────
    A hand-drawn print-shop identity for a drawing game. Everything looks inked

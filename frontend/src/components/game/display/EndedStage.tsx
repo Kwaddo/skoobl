@@ -37,7 +37,10 @@ export function EndedStage({
       {winner && (
         <p className="font-hand text-2xl leading-tight text-muted">
           winner:{" "}
-          <span dir="auto" className="font-display text-xl font-black text-foreground">
+          <span
+            dir="auto"
+            className="font-display text-xl font-black text-foreground"
+          >
             {winner.name}
           </span>{" "}
           with {winner.score ?? 0} pts
@@ -89,7 +92,7 @@ function PlayerEnded({ banner }: { banner: React.ReactNode }) {
   };
 
   return (
-    <div className="m-auto flex w-full max-w-2xl max-h-full min-h-0 flex-col gap-5">
+    <div className="m-auto flex w-full max-w-2xl max-h-full min-h-0 flex-col gap-5 lg:max-w-4xl">
       {banner}
       {rounds.length > 0 ? (
         <>
@@ -103,7 +106,7 @@ function PlayerEnded({ banner }: { banner: React.ReactNode }) {
               Download all ↓
             </button>
           </div>
-          <ul className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto pr-1 sm:grid-cols-3">
+          <ul className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
             {rounds.map((r) => (
               <li key={r} className="card-arcade flex flex-col gap-2 p-3">
                 <StrokesView strokes={myDrawings[r]} />

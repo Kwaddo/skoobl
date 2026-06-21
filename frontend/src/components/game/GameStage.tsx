@@ -112,9 +112,10 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
   // the narrow controller shell like any other player.
   const shell = bigScreen
     ? "mx-auto flex h-dvh w-full max-w-[1700px] flex-col gap-5 overflow-hidden px-6 py-5 sm:px-10"
-    : // narrow controller normally; when the window is short the canvas+tools go
-      // side-by-side, so widen it to give the canvas real room to grow.
-      "mx-auto flex h-dvh w-full max-w-xl flex-col gap-4 overflow-hidden px-5 py-5 short:max-w-5xl";
+    : // Narrow controller on phones/portrait tablets. On a wide desktop (lg+) it
+      // widens into a real two-pane workspace instead of a thin centred column,
+      // and short/landscape still gets the side-by-side canvas room.
+      "mx-auto flex h-dvh w-full max-w-xl flex-col gap-4 overflow-hidden px-5 py-5 short:max-w-5xl lg:max-w-6xl lg:gap-5 lg:px-8";
 
   return (
     <main className={`grain-above ${shell}`}>
