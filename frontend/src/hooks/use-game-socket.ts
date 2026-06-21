@@ -100,6 +100,10 @@ export function useGameSocket(
       (id: string) => emit("submitGuess", { id }),
       [emit],
     ),
+    firePowerup: useCallback(
+      (id: string) => emit("firePowerup", { id }),
+      [emit],
+    ),
   };
 }
 

@@ -93,6 +93,7 @@ export function HostConfig({ actions }: { actions: GameActions }) {
           options={[
             { value: "classic" as const, label: "Classic" },
             { value: "flipped" as const, label: "Whose Doodle" },
+            { value: "frenzy" as const, label: "Frenzy" },
           ]}
           onChange={(v) => {
             setGameMode(v);
