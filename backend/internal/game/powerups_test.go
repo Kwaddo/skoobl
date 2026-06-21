@@ -29,12 +29,52 @@ func TestPowerupsForPhaseSplit(t *testing.T) {
 func TestActiveEffectsPrunesExpired(t *testing.T) {
 	now := int64(1000)
 	in := []ActiveEffect{
-		{Kind: PowerFog, EndsAt: 500, From: "a"},    // expired
+		{Kind: PowerFog, EndsAt: 500, From: "a"},     // expired
 		{Kind: PowerSquint, EndsAt: 1500, From: "b"}, // live
 	}
 	out := activeEffects(in, now)
 	if len(out) != 1 || out[0].Kind != PowerSquint {
 		t.Fatalf("activeEffects = %+v, want only the live squint", out)
+	}
+}
+
+func TestGrantDropsRespectsCapAndConnection(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Mode = ModeFrenzy
+
+	// Grant repeatedly; nobody exceeds the cap.
+	for i := 0; i < inventoryCap+3; i++ {
+		r.grantDrops(PhaseDrawing)
+	}
+	for name, held := range r.state.Inventory {
+		if len(held) > inventoryCap {
+			t.Fatalf("%s holds %d powerups, over cap %d", name, len(held), inventoryCap)
+		}
+		for _, p := range held {
+			if powerupCatalog[p].phase != PhaseDrawing {
+				t.Fatalf("%s holds %q, not a draw-phase powerup", name, p)
+			}
+		}
+	}
+	if len(r.state.Inventory["alice"]) != inventoryCap {
+		t.Fatalf("alice holds %d, want the cap %d after many drops", len(r.state.Inventory["alice"]), inventoryCap)
+	}
+}
+
+func TestDropCommandGenGated(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Mode = ModeFrenzy
+	r.state.Phase = PhaseDrawing
+
+	// A stale generation does nothing.
+	r.handle(Command{Kind: CmdDropPowerup, Gen: r.phaseGen - 1})
+	if len(r.state.Inventory) != 0 {
+		t.Fatal("a stale-gen drop tick must not grant powerups")
+	}
+	// The current generation grants a round of drops.
+	r.handle(Command{Kind: CmdDropPowerup, Gen: r.phaseGen})
+	if len(r.state.Inventory) == 0 {
+		t.Fatal("a current-gen drop tick should grant powerups")
 	}
 }
 

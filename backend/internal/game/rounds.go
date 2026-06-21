@@ -373,15 +373,21 @@ func (r *Room) returnToLobby() {
 }
 
 // startPhase sets the phase, bumps the generation, and arms the advance timer for
-// timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown.
+// timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown. In
+// Frenzy it also clears phase-scoped effects and arms the drop ticker for the
+// drawing/guessing phases.
 func (r *Room) startPhase(p Phase, durMs int) {
 	r.state.Phase = p
 	r.phaseGen++
+	r.state.Effects = nil // effects are phase-scoped — none carry across a transition
 	if durMs > 0 {
 		d := time.Duration(durMs) * time.Millisecond
 		r.state.PhaseEndsAt = time.Now().Add(d).UnixMilli()
 		r.armAdvance(r.phaseGen, d)
 	} else {
 		r.state.PhaseEndsAt = 0
+	}
+	if r.state.Mode == ModeFrenzy && (p == PhaseDrawing || p == PhaseGuessing) {
+		r.armDrop(r.phaseGen, dropInterval)
 	}
 }

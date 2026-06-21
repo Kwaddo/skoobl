@@ -1,5 +1,7 @@
 package game
 
+import "math/rand/v2"
+
 // Powerup is a Frenzy sabotage item. Each belongs to a phase and only fires
 // during that phase. Every effect is view-only or a brief input lock — it never
 // touches stroke data — and self-expires after its duration.
@@ -52,6 +54,31 @@ func powerupsForPhase(p Phase) []Powerup {
 		return nil
 	}
 }
+
+// grantDrops gives every connected player one random powerup eligible for the
+// current phase, up to inventoryCap. Players already at the cap are skipped.
+func (r *Room) grantDrops(phase Phase) {
+	pool := powerupsForPhase(phase)
+	if len(pool) == 0 {
+		return
+	}
+	if r.state.Inventory == nil {
+		r.state.Inventory = map[string][]Powerup{}
+	}
+	for _, p := range r.state.Players {
+		pr, ok := r.present[p.Name]
+		if !ok || !pr.connected {
+			continue
+		}
+		if len(r.state.Inventory[p.Name]) >= inventoryCap {
+			continue
+		}
+		r.state.Inventory[p.Name] = append(r.state.Inventory[p.Name], pool[rand.IntN(len(pool))])
+	}
+}
+
+// firePowerup is implemented in Task 3.
+func (r *Room) firePowerup(c Command) {}
 
 // activeEffects returns the still-live effects (EndsAt strictly after now).
 func activeEffects(effects []ActiveEffect, now int64) []ActiveEffect {

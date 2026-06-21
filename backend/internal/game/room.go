@@ -25,7 +25,9 @@ const (
 	CmdAdvance       // internal, timer-driven phase advance
 	CmdPrune
 	CmdReapIfEmpty
-	CmdHostPrune // internal: host display gone past grace → reap
+	CmdHostPrune   // internal: host display gone past grace → reap
+	CmdFirePowerup // player: fire a held powerup at a random rival (frenzy)
+	CmdDropPowerup // internal: periodic powerup drop tick (frenzy)
 )
 
 // Tunables.
@@ -50,6 +52,11 @@ const (
 	// the headcount — keeps even a full room's round from dragging (see
 	// guessesForPlayers). At maxPlayers this is the value the scale already lands on.
 	maxFeatures = 5
+
+	// dropInterval is how often Frenzy hands every player a fresh powerup while
+	// drawing or guessing. inventoryCap bounds a player's held powerups.
+	dropInterval = 8 * time.Second
+	inventoryCap = 3
 
 	// Round configuration bounds and defaults.
 	DefaultRounds  = 3
@@ -119,10 +126,11 @@ type Command struct {
 	Gen       int            // prune/advance: generation captured when the timer was armed
 
 	// Game payloads.
-	Strokes []Stroke // submitDrawing
-	Guess   string   // submitGuess: the guessed artist's name
-	GuessID string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
-	Config  *Config  // configure
+	Strokes   []Stroke // submitDrawing
+	Guess     string   // submitGuess: the guessed artist's name
+	GuessID   string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
+	Config    *Config  // configure
+	PowerupID string   // firePowerup: the powerup kind being fired
 }
 
 // Snapshotter persists a room's serialized state. Implemented by
@@ -302,6 +310,15 @@ func (r *Room) armAdvance(gen int, d time.Duration) {
 	})
 }
 
+// armDrop schedules the next Frenzy drop tick. The captured generation makes the
+// timer a no-op once the phase changes (mirrors armAdvance), so drops naturally
+// stop when the round leaves drawing/guessing.
+func (r *Room) armDrop(gen int, d time.Duration) {
+	time.AfterFunc(d, func() {
+		r.Submit(Command{Kind: CmdDropPowerup, Gen: gen})
+	})
+}
+
 func (r *Room) isDone() bool {
 	select {
 	case <-r.done:
@@ -361,6 +378,13 @@ func (r *Room) handle(c Command) {
 	case CmdAdvance:
 		if c.Gen == r.phaseGen {
 			r.advance()
+		}
+	case CmdFirePowerup:
+		r.firePowerup(c)
+	case CmdDropPowerup:
+		if c.Gen == r.phaseGen {
+			r.grantDrops(r.state.Phase)
+			r.armDrop(r.phaseGen, dropInterval)
 		}
 	}
 }
