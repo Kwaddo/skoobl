@@ -346,6 +346,8 @@ func (r *Room) endGame() {
 	r.state.RoundFeatured = nil
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
+	r.state.Inventory = nil
+	r.state.Effects = nil
 }
 
 // returnToLobby sends a finished game back to the lobby for a fresh round,
@@ -367,6 +369,8 @@ func (r *Room) returnToLobby() {
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
 	r.state.FeaturedPast = nil
+	r.state.Inventory = nil
+	r.state.Effects = nil
 	for i := range r.state.Players {
 		r.state.Players[i].Score = 0
 	}

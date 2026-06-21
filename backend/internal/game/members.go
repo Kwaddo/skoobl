@@ -315,6 +315,8 @@ func (r *Room) clearRoundData(name string) {
 	delete(r.state.Locked, name)
 	delete(r.state.Guesses, name)
 	delete(r.state.GuessTimes, name)
+	delete(r.state.Inventory, name)
+	delete(r.state.Effects, name)
 }
 
 // reap shuts the room down: tell the hub to drop it, then stop the loop.
