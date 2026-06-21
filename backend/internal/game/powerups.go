@@ -1,6 +1,9 @@
 package game
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+	"time"
+)
 
 // Powerup is a Frenzy sabotage item. Each belongs to a phase and only fires
 // during that phase. Every effect is view-only or a brief input lock — it never
@@ -77,8 +80,75 @@ func (r *Room) grantDrops(phase Phase) {
 	}
 }
 
-// firePowerup is implemented in Task 3.
-func (r *Room) firePowerup(c Command) {}
+// firePowerup validates a fire and applies the powerup's effect to a random
+// connected rival. It is a no-op (the item is kept) when not in frenzy, in the
+// wrong phase, the powerup is unknown / not fireable this phase, not held, or
+// there is no eligible rival.
+func (r *Room) firePowerup(c Command) {
+	if r.state.Mode != ModeFrenzy {
+		return
+	}
+	if r.state.Phase != PhaseDrawing && r.state.Phase != PhaseGuessing {
+		return
+	}
+	pw := Powerup(c.PowerupID)
+	spec, ok := powerupCatalog[pw]
+	if !ok || spec.phase != r.state.Phase {
+		return
+	}
+	if !r.hasPowerup(c.Player, pw) {
+		return
+	}
+	victim := r.randomRival(c.Player)
+	if victim == "" {
+		return
+	}
+	r.consumePowerup(c.Player, pw)
+	if r.state.Effects == nil {
+		r.state.Effects = map[string][]ActiveEffect{}
+	}
+	r.state.Effects[victim] = append(r.state.Effects[victim], ActiveEffect{
+		Kind:   pw,
+		EndsAt: time.Now().Add(time.Duration(spec.durMs) * time.Millisecond).UnixMilli(),
+		From:   c.Player,
+	})
+}
+
+func (r *Room) hasPowerup(name string, pw Powerup) bool {
+	for _, held := range r.state.Inventory[name] {
+		if held == pw {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Room) consumePowerup(name string, pw Powerup) {
+	held := r.state.Inventory[name]
+	for i, h := range held {
+		if h == pw {
+			r.state.Inventory[name] = append(held[:i], held[i+1:]...)
+			return
+		}
+	}
+}
+
+// randomRival returns a random connected player other than self, or "" if none.
+func (r *Room) randomRival(self string) string {
+	var rivals []string
+	for _, p := range r.state.Players {
+		if p.Name == self {
+			continue
+		}
+		if pr, ok := r.present[p.Name]; ok && pr.connected {
+			rivals = append(rivals, p.Name)
+		}
+	}
+	if len(rivals) == 0 {
+		return ""
+	}
+	return rivals[rand.IntN(len(rivals))]
+}
 
 // activeEffects returns the still-live effects (EndsAt strictly after now).
 func activeEffects(effects []ActiveEffect, now int64) []ActiveEffect {

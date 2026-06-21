@@ -78,6 +78,67 @@ func TestDropCommandGenGated(t *testing.T) {
 	}
 }
 
+func frenzyGuessing(t *testing.T, names ...string) *Room {
+	t.Helper()
+	r := syncRoom(t, names...)
+	r.state.Mode = ModeFrenzy
+	for _, n := range names {
+		draft(r, n)
+	}
+	r.advance() // → guessing
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing", r.state.Phase)
+	}
+	return r
+}
+
+func TestFireLandsOnRivalAndConsumes(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := frenzyGuessing(t, names...)
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerSquint}}
+
+	r.handle(Command{Kind: CmdFirePowerup, Player: "alice", PowerupID: string(PowerSquint)})
+
+	if len(r.state.Inventory["alice"]) != 0 {
+		t.Fatalf("alice still holds %+v, want consumed", r.state.Inventory["alice"])
+	}
+	hit := 0
+	for victim, effs := range r.state.Effects {
+		if victim == "alice" {
+			t.Fatal("a fire must not land on its own caster")
+		}
+		for _, e := range effs {
+			if e.Kind == PowerSquint && e.From == "alice" {
+				hit++
+				if e.EndsAt <= time.Now().UnixMilli() {
+					t.Fatal("effect endsAt should be in the future")
+				}
+			}
+		}
+	}
+	if hit != 1 {
+		t.Fatalf("squint landed on %d rivals, want exactly 1", hit)
+	}
+}
+
+func TestFireRejectedWrongPhaseOrUnowned(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := frenzyGuessing(t, names...)
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerSquint}}
+
+	// A draw-phase powerup can't fire during guessing.
+	r.handle(Command{Kind: CmdFirePowerup, Player: "alice", PowerupID: string(PowerFog)})
+	// An unowned powerup can't fire.
+	r.handle(Command{Kind: CmdFirePowerup, Player: "bob", PowerupID: string(PowerSquint)})
+
+	if len(r.state.Effects) != 0 {
+		t.Fatalf("no effect should exist after rejected fires, got %+v", r.state.Effects)
+	}
+	if len(r.state.Inventory["alice"]) != 1 {
+		t.Fatal("alice's squint must be untouched after a wrong-phase fire")
+	}
+}
+
 func TestViewRedactsPowerups(t *testing.T) {
 	r := syncRoom(t, "alice", "bob", "carol", "dave")
 	r.state.Mode = ModeFrenzy
