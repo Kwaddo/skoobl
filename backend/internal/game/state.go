@@ -34,6 +34,23 @@ const (
 	LangAR Language = "ar"
 )
 
+// Mode selects the round variant. Classic is the default and is unchanged by the
+// addition of other modes — mode only ever adds branches, never alters classic.
+type Mode string
+
+const (
+	ModeClassic Mode = "classic" // current behavior; the default
+	ModeFlipped Mode = "flipped" // Whose Doodle: pick which drawing is the target's
+)
+
+// sanitizeMode coerces an untrusted mode to a known value, defaulting to classic.
+func sanitizeMode(m Mode) Mode {
+	if m == ModeFlipped {
+		return ModeFlipped
+	}
+	return ModeClassic
+}
+
 // Point is a single coordinate in the fixed logical canvas space (see Canvas*
 // constants). Stored as float so sub-pixel pen movement survives scaling.
 type Point struct {
@@ -77,6 +94,7 @@ type Reveal struct {
 type Config struct {
 	Rounds     int      `json:"rounds"`
 	Language   Language `json:"language"`
+	Mode       Mode     `json:"mode"`       // round variant; empty/unknown ⇒ classic
 	Categories []string `json:"categories"` // custom prompt words; empty ⇒ random pool
 	DrawMs     int      `json:"drawMs"`     // drawing time per round (ms)
 	GuessMs    int      `json:"guessMs"`    // guessing time per round (ms)
@@ -89,6 +107,7 @@ type Config struct {
 type GameState struct {
 	Code  string `json:"code"`
 	Phase Phase  `json:"phase"`
+	Mode  Mode   `json:"mode"`
 	Host  string `json:"host"`
 	// HostPlays is the room mode chosen when the host creates it: false ⇒ the host
 	// is a non-playing shared screen (the "TV"); true ⇒ the host is also a player
@@ -144,6 +163,7 @@ func newGameState(code string) GameState {
 	return GameState{
 		Code:        code,
 		Phase:       PhaseLobby,
+		Mode:        ModeClassic,
 		Players:     []Player{},
 		TotalRounds: DefaultRounds,
 		Language:    LangEN,
@@ -182,6 +202,7 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 	v := GameState{
 		Code:         g.Code,
 		Phase:        g.Phase,
+		Mode:         g.Mode,
 		Host:         g.Host,
 		HostPlays:    g.HostPlays,
 		Round:        g.Round,

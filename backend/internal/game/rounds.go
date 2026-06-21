@@ -15,6 +15,7 @@ func (r *Room) applyConfig(cfg Config) {
 	r.state.DrawMs = clamp(cfg.DrawMs, minDrawMs, maxDrawMs)
 	r.state.GuessMs = clamp(cfg.GuessMs, minGuessMs, maxGuessMs)
 	r.state.Categories = sanitizeCategories(cfg.Categories)
+	r.state.Mode = sanitizeMode(cfg.Mode)
 }
 
 func (r *Room) startGame() {

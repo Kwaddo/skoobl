@@ -1243,6 +1243,46 @@ func TestSanitizeRejectsBadFillColor(t *testing.T) {
 	}
 }
 
+// syncLobby joins a host display ("tv") plus players and stops in the lobby
+// (unlike syncRoom, which also starts the game). The tv is the host, so it may
+// configure.
+func syncLobby(t *testing.T, players ...string) *Room {
+	t.Helper()
+	r := NewRoom("lobby1")
+	r.handle(Command{Kind: CmdJoin, Player: "tv", Spectator: true,
+		Subscribe: make(chan GameState, 64), Ack: make(chan string, 1)})
+	for _, n := range players {
+		r.handle(Command{Kind: CmdJoin, Player: n,
+			Subscribe: make(chan GameState, 64), Ack: make(chan string, 1)})
+	}
+	if r.state.Phase != PhaseLobby {
+		t.Fatalf("phase = %q, want lobby", r.state.Phase)
+	}
+	return r
+}
+
+func TestModeConfiguredAndEchoed(t *testing.T) {
+	r := syncLobby(t, "alice", "bob", "carol", "dave")
+
+	r.handle(Command{Kind: CmdConfigure, Player: "tv", Config: &Config{
+		Rounds: 3, Mode: ModeFlipped, DrawMs: 60000, GuessMs: 25000,
+	}})
+	if r.state.Mode != ModeFlipped {
+		t.Fatalf("mode = %q, want flipped", r.state.Mode)
+	}
+	if v := r.state.viewFor("alice", r.present); v.Mode != ModeFlipped {
+		t.Fatalf("view mode = %q, want flipped (must be public)", v.Mode)
+	}
+
+	// Unknown mode falls back to classic.
+	r.handle(Command{Kind: CmdConfigure, Player: "tv", Config: &Config{
+		Rounds: 3, Mode: "wat", DrawMs: 60000, GuessMs: 25000,
+	}})
+	if r.state.Mode != ModeClassic {
+		t.Fatalf("mode = %q, want classic fallback", r.state.Mode)
+	}
+}
+
 // syncRoom builds a room and joins a host + the given players by calling handle
 // directly (no Run goroutine), then starts the game. Returns the room in the
 // drawing phase.
