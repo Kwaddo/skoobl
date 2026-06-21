@@ -74,6 +74,7 @@ interface GameStore {
   setSelf: (name: string) => void;
   applyState: (s: GameState) => void;
   recordDrawing: (round: number, strokes: Stroke[]) => void;
+  pushNotice: (text: string) => void;
   dismissNotice: (id: number) => void;
   setError: (msg: string | null) => void;
   setConnected: (v: boolean) => void;
@@ -192,6 +193,8 @@ export const useGameStore = create<GameStore>((set) => ({
         notices,
       };
     }),
+  pushNotice: (text) =>
+    set((s) => ({ notices: [...s.notices, { id: ++noticeSeq, text }] })),
   dismissNotice: (id) =>
     set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   setError: (msg) => set({ error: msg }),

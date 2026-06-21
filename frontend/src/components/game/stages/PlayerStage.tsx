@@ -10,6 +10,7 @@ import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
 import { FlippedGuessing } from "../display/FlippedGuessing";
 import { PlayerGrid } from "../display/PlayerList";
+import { PowerupTray } from "../display/PowerupTray";
 import { Timer } from "../display/Timer";
 import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "../icons";
 
@@ -78,6 +79,7 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
   const drawMs = useGameStore((s) => s.drawMs);
   const recordDrawing = useGameStore((s) => s.recordDrawing);
   const connected = useGameStore((s) => s.connected);
+  const mode = useGameStore((s) => s.mode);
   const remaining = useCountdown(endsAt);
   const [submitted, setSubmitted] = useState(false);
   const strokesRef = useRef<Stroke[]>([]);
@@ -126,6 +128,8 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
         </div>
         <Timer remaining={remaining} total={Math.round(drawMs / 1000)} />
       </div>
+
+      {mode === "frenzy" && <PowerupTray actions={actions} />}
 
       {submitted ? (
         <div className="ink-block tilt-l rise flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-10 text-center lg:mx-auto lg:max-w-2xl">
@@ -241,6 +245,8 @@ export function PlayerGuessing({
         </div>
         <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
       </div>
+
+      {mode === "frenzy" && <PowerupTray actions={actions} />}
 
       {/* `contents` keeps the mobile stack identical (no extra box); on desktop
           it becomes the two-pane row holding the drawing and the guess list */}

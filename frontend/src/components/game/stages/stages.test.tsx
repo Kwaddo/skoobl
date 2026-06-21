@@ -15,6 +15,7 @@ const noopActions = {
   draftDrawing: () => {},
   submitGuess: () => {},
   submitDoodleGuess: () => {},
+  firePowerup: () => {},
 } as unknown as GameActions;
 
 describe("stage split", () => {
@@ -306,5 +307,25 @@ describe("stage split", () => {
     expect(queryByText(/play again/i)).toBeNull();
     // "bob" only appears if the Scoreboard rendered — it must not.
     expect(queryByText("bob")).toBeNull();
+  });
+
+  it("frenzy tray shows held powerups and fires them", () => {
+    const fired: string[] = [];
+    const actions = {
+      ...noopActions,
+      firePowerup: (id: string) => fired.push(id),
+    } as unknown as GameActions;
+    useGameStore.setState({
+      phase: "drawing",
+      mode: "frenzy",
+      players: [{ name: "ann" }, { name: "bob" }],
+      yourPrompt: "cat",
+      yourPowerups: ["fog", "cramp"],
+    });
+    const { getByLabelText } = render(
+      <PlayerStage name="ann" actions={actions} />,
+    );
+    getByLabelText(/fire fog/i).click();
+    expect(fired).toEqual(["fog"]);
   });
 });
