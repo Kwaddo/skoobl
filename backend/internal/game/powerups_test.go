@@ -1,0 +1,73 @@
+package game
+
+import (
+	"testing"
+	"time"
+)
+
+func TestPowerupsForPhaseSplit(t *testing.T) {
+	draw := powerupsForPhase(PhaseDrawing)
+	guess := powerupsForPhase(PhaseGuessing)
+	if len(draw) == 0 || len(guess) == 0 {
+		t.Fatalf("empty pools: draw=%d guess=%d", len(draw), len(guess))
+	}
+	for _, p := range draw {
+		if powerupCatalog[p].phase != PhaseDrawing {
+			t.Fatalf("%q is in the draw pool but its spec phase is %q", p, powerupCatalog[p].phase)
+		}
+		if powerupCatalog[p].durMs <= 0 {
+			t.Fatalf("%q has non-positive duration", p)
+		}
+	}
+	for _, p := range guess {
+		if powerupCatalog[p].phase != PhaseGuessing {
+			t.Fatalf("%q is in the guess pool but its spec phase is %q", p, powerupCatalog[p].phase)
+		}
+	}
+}
+
+func TestActiveEffectsPrunesExpired(t *testing.T) {
+	now := int64(1000)
+	in := []ActiveEffect{
+		{Kind: PowerFog, EndsAt: 500, From: "a"},    // expired
+		{Kind: PowerSquint, EndsAt: 1500, From: "b"}, // live
+	}
+	out := activeEffects(in, now)
+	if len(out) != 1 || out[0].Kind != PowerSquint {
+		t.Fatalf("activeEffects = %+v, want only the live squint", out)
+	}
+}
+
+func TestViewRedactsPowerups(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Mode = ModeFrenzy
+	future := time.Now().Add(time.Minute).UnixMilli()
+	r.state.Inventory = map[string][]Powerup{
+		"alice": {PowerFog},
+		"bob":   {PowerSquint, PowerCramp},
+	}
+	r.state.Effects = map[string][]ActiveEffect{
+		"alice": {{Kind: PowerLights, EndsAt: future, From: "bob"}},
+		"bob":   {{Kind: PowerFog, EndsAt: 1, From: "alice"}}, // expired
+	}
+
+	av := r.state.viewFor("alice", r.present)
+	if len(av.YourPowerups) != 1 || av.YourPowerups[0] != PowerFog {
+		t.Fatalf("alice powerups = %+v, want [fog]", av.YourPowerups)
+	}
+	if len(av.YourEffects) != 1 || av.YourEffects[0].Kind != PowerLights {
+		t.Fatalf("alice effects = %+v, want [lights]", av.YourEffects)
+	}
+
+	bv := r.state.viewFor("bob", r.present)
+	if len(bv.YourPowerups) != 2 {
+		t.Fatalf("bob powerups = %+v, want two", bv.YourPowerups)
+	}
+	if len(bv.YourEffects) != 0 {
+		t.Fatalf("bob effects = %+v, want none (expired pruned)", bv.YourEffects)
+	}
+	// No cross-leak: alice's view never carries bob's inventory.
+	if av.Inventory != nil || av.Effects != nil {
+		t.Fatal("authoritative Inventory/Effects must not appear in a client view")
+	}
+}
