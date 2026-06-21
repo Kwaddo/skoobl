@@ -353,7 +353,7 @@ function HostReveal({ actions }: { actions: GameActions }) {
                       ) : (
                         <Scribble
                           seed={artist}
-                          className="mx-auto mt-1.5 block h-4 w-[7rem] text-muted"
+                          className="mx-auto mt-1.5 block h-4 w-28 text-muted"
                         />
                       )}
                     </li>
