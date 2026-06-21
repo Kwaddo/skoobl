@@ -1807,16 +1807,25 @@ func TestFlippedRoundRunsTwoFeaturesAndAdvances(t *testing.T) {
 		t.Fatalf("featured the same target twice in one round: %q", second)
 	}
 
-	// No non-target view ever exposes which pool id is the second target's.
+	// Every non-target guesser must see the second target's drawing present but
+	// unlabeled — among at least two candidates, so it can't be identified by
+	// elimination. (The pool carries opaque ids only; no name→id map is sent.)
 	for _, n := range names {
 		if n == second {
 			continue
 		}
 		v := r.state.viewFor(n, r.present)
+		if len(v.Pool) < 2 {
+			t.Fatalf("non-target %s sees a pool of %d — too few to hide the target", n, len(v.Pool))
+		}
+		found := false
 		for _, d := range v.Pool {
-			if d.ID == r.state.DrawIDs[second] && len(v.Pool) == 1 {
-				t.Fatal("pool collapsed to a single labeled answer")
+			if d.ID == r.state.DrawIDs[second] {
+				found = true
 			}
+		}
+		if !found {
+			t.Fatalf("non-target %s's pool is missing the (unlabeled) target drawing", n)
 		}
 	}
 
