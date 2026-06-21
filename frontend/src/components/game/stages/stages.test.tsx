@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { useGameStore } from "@/lib/store";
@@ -327,5 +327,43 @@ describe("stage split", () => {
     );
     getByLabelText(/fire fog/i).click();
     expect(fired).toEqual(["fog"]);
+  });
+
+  it("frenzy tray toasts incoming effects and still toasts after a round reset", () => {
+    useGameStore.setState({
+      phase: "drawing",
+      mode: "frenzy",
+      players: [{ name: "ann" }, { name: "bob" }],
+      yourPrompt: "cat",
+      yourPowerups: ["fog"],
+      yourEffects: [],
+    });
+    render(<PlayerStage name="ann" actions={noopActions} />);
+
+    // Round 1: a fog effect arrives from bob.
+    act(() => {
+      useGameStore.setState({
+        yourEffects: [{ kind: "fog", endsAt: Date.now() + 5000, from: "bob" }],
+      });
+    });
+    expect(
+      useGameStore.getState().notices.some((n) => n.text === "bob hit you with Fog!"),
+    ).toBe(true);
+
+    // Round reset: yourEffects clears (new round starts).
+    act(() => {
+      useGameStore.setState({ yourEffects: [] });
+    });
+
+    // Round 2: a cramp effect arrives from ann — must still toast even though
+    // seen.current was stale under the old guard (effects.length > seen.current).
+    act(() => {
+      useGameStore.setState({
+        yourEffects: [{ kind: "cramp", endsAt: Date.now() + 5000, from: "ann" }],
+      });
+    });
+    expect(
+      useGameStore.getState().notices.some((n) => n.text === "ann hit you with Cramp!"),
+    ).toBe(true);
   });
 });

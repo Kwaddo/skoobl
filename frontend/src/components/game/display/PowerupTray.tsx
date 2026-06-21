@@ -25,10 +25,8 @@ export function PowerupTray({ actions }: { actions: GameActions }) {
 
   // Announce newly-arrived incoming effects once each.
   useEffect(() => {
-    if (effects.length > seen.current) {
-      for (const e of effects.slice(seen.current)) {
-        pushNotice(`${e.from} hit you with ${META[e.kind].label}!`);
-      }
+    for (const e of effects.slice(seen.current)) {
+      pushNotice(`${e.from} hit you with ${META[e.kind].label}!`);
     }
     seen.current = effects.length;
   }, [effects, pushNotice]);
@@ -45,7 +43,6 @@ export function PowerupTray({ actions }: { actions: GameActions }) {
     <div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
       {powerups.map((p, i) => (
         <button
-          // index-keyed: duplicates of the same powerup are distinct slots
           key={`${p}-${i}`}
           type="button"
           aria-label={`fire ${META[p].label}`}
