@@ -139,6 +139,33 @@ func TestFireRejectedWrongPhaseOrUnowned(t *testing.T) {
 	}
 }
 
+func TestInventoryWipedReturningToLobby(t *testing.T) {
+	r := frenzyGuessing(t, "alice", "bob", "carol", "dave")
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerSquint}}
+	r.state.Effects = map[string][]ActiveEffect{"bob": {{Kind: PowerSquint, EndsAt: 1 << 40, From: "alice"}}}
+
+	r.handle(Command{Kind: CmdReturnToLobby, Player: "tv"})
+
+	if len(r.state.Inventory) != 0 || len(r.state.Effects) != 0 {
+		t.Fatalf("return-to-lobby must clear powerup state: inv=%+v eff=%+v", r.state.Inventory, r.state.Effects)
+	}
+}
+
+func TestClearRoundDataDropsDepartedPowerups(t *testing.T) {
+	r := frenzyGuessing(t, "alice", "bob", "carol", "dave")
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerSquint}}
+	r.state.Effects = map[string][]ActiveEffect{"alice": {{Kind: PowerFog, EndsAt: 1 << 40, From: "bob"}}}
+
+	r.clearRoundData("alice")
+
+	if _, ok := r.state.Inventory["alice"]; ok {
+		t.Fatal("a departed player's inventory must be cleared")
+	}
+	if _, ok := r.state.Effects["alice"]; ok {
+		t.Fatal("a departed player's effects must be cleared")
+	}
+}
+
 func TestViewRedactsPowerups(t *testing.T) {
 	r := syncRoom(t, "alice", "bob", "carol", "dave")
 	r.state.Mode = ModeFrenzy
