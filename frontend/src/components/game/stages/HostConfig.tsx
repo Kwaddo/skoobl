@@ -72,7 +72,9 @@ export function HostConfig({ actions }: { actions: GameActions }) {
 
   return (
     <div className="card-arcade flex h-full min-h-0 flex-col gap-5 overflow-auto p-4 sm:p-5">
-      <h3 className="shrink-0 font-display text-lg font-bold">Game settings</h3>
+      <h3 className="ink-underline w-fit shrink-0 font-display text-lg font-black">
+        Game settings
+      </h3>
 
       <Row label="Rounds">
         <Stepper
@@ -151,8 +153,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       >
         <div className="overflow-hidden">
           <label className="flex flex-col gap-2">
-            <span className="text-sm text-muted">
-              One word per line — these replace the random pool.
+            <span className="font-hand text-lg text-muted">
+              one word per line — these replace the random pool.
             </span>
             <textarea
               dir="auto"
@@ -182,7 +184,7 @@ function Row({
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <span className="text-sm font-medium">{label}</span>
+      <span className="text-sm font-bold">{label}</span>
       {children}
     </div>
   );

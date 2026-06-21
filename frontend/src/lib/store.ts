@@ -28,9 +28,12 @@ interface GameStore {
   code: string;
   phase: Phase;
   host: string;
+  hostPlays: boolean;
   players: Player[];
   round: number;
   totalRounds: number;
+  featureIndex: number;
+  featureCount: number;
   language: Language;
   drawMs: number;
   guessMs: number;
@@ -48,6 +51,7 @@ interface GameStore {
   youAreArtist: boolean;
   yourGuess: string;
   reveal: Reveal | null;
+  roundFeatured: string[];
   closed: boolean;
   notices: Notice[];
   self: string;
@@ -69,9 +73,12 @@ const initial = {
   code: "",
   phase: "lobby" as Phase,
   host: "",
+  hostPlays: false,
   players: [] as Player[],
   round: 0,
   totalRounds: 3,
+  featureIndex: 0,
+  featureCount: 0,
   language: "en" as Language,
   drawMs: 80_000,
   guessMs: 25_000,
@@ -84,6 +91,7 @@ const initial = {
   youAreArtist: false,
   yourGuess: "",
   reveal: null as Reveal | null,
+  roundFeatured: [] as string[],
   closed: false,
   notices: [] as Notice[],
   self: "",
@@ -128,9 +136,12 @@ export const useGameStore = create<GameStore>((set) => ({
         code: s.code,
         phase: s.phase,
         host: s.host,
+        hostPlays: s.hostPlays ?? false,
         players: s.players ?? [],
         round: s.round ?? 0,
         totalRounds: s.totalRounds ?? initial.totalRounds,
+        featureIndex: s.featureIndex ?? 0,
+        featureCount: s.featureCount ?? 0,
         language: s.language ?? "en",
         drawMs: s.drawMs ?? initial.drawMs,
         guessMs: s.guessMs ?? initial.guessMs,
@@ -151,6 +162,7 @@ export const useGameStore = create<GameStore>((set) => ({
         youAreArtist: s.youAreArtist ?? false,
         yourGuess: s.yourGuess ?? "",
         reveal: s.reveal ?? null,
+        roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,
         notices,
       };

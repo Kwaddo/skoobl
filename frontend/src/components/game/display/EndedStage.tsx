@@ -1,3 +1,4 @@
+import { Confetti } from "@/components/Confetti";
 import { downloadStrokesPng, pngFilename } from "@/lib/canvas";
 import { useGameStore } from "@/lib/store";
 import { StrokesView } from "../canvas/StrokesView";
@@ -23,7 +24,8 @@ export function EndedStage({
   const youWon = winner?.name === name;
 
   const banner = (
-    <div className="card-arcade flex shrink-0 flex-col items-center gap-2 p-8 text-center">
+    <div className="ink-block tilt-l flex shrink-0 flex-col items-center gap-2 p-8 text-center">
+      {youWon && <Confetti />}
       <span className="trophy-bounce text-foreground">
         {youWon ? (
           <Trophy className="h-12 w-12" />
@@ -31,11 +33,11 @@ export function EndedStage({
           <Sparkle className="h-12 w-12" />
         )}
       </span>
-      <h2 className="font-display text-2xl font-bold">Game over</h2>
+      <h2 className="font-display text-3xl font-black">Game over</h2>
       {winner && (
-        <p className="text-sm text-muted">
-          Winner:{" "}
-          <span dir="auto" className="font-display font-bold text-foreground">
+        <p className="font-hand text-2xl leading-tight text-muted">
+          winner:{" "}
+          <span dir="auto" className="font-display text-xl font-black text-foreground">
             {winner.name}
           </span>{" "}
           with {winner.score ?? 0} pts

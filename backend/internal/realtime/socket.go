@@ -79,6 +79,9 @@ func (c *conn) join(h *hub.Hub, args []any) {
 	code := strings.TrimSpace(stringField(args, "code"))
 	name := strings.TrimSpace(stringField(args, "name"))
 	spectator := boolField(args, "spectator")
+	// A playing host joins as both a player and the room owner (play=true). A
+	// display host joins as a non-playing spectator. Plain players send neither.
+	asHost := boolField(args, "play")
 
 	if name == "" {
 		c.emitError("Please enter a name before joining.")
@@ -100,7 +103,7 @@ func (c *conn) join(h *hub.Hub, args []any) {
 	// Submit the join and wait for the room's verdict before wiring anything up.
 	updates := make(chan game.GameState, 16)
 	resp := make(chan string, 1)
-	room.Submit(game.Command{Kind: game.CmdJoin, Player: name, Spectator: spectator, Subscribe: updates, Ack: resp})
+	room.Submit(game.Command{Kind: game.CmdJoin, Player: name, Spectator: spectator, AsHost: asHost, Subscribe: updates, Ack: resp})
 
 	var msg string
 	select {

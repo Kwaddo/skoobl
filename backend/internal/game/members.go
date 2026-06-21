@@ -10,6 +10,10 @@ func (r *Room) join(c Command) {
 		r.joinSpectator(c)
 		return
 	}
+	if c.AsHost {
+		r.joinPlayingHost(c)
+		return
+	}
 	name := c.Player
 	if r.state.Phase == PhaseEnded {
 		ack(c, "This game has already ended.")
@@ -84,15 +88,61 @@ func (r *Room) joinSpectator(c Command) {
 	ack(c, "")
 }
 
-func (r *Room) disconnect(c Command) {
-	r.unsubscribe(c.Unsub)
-	if r.host != nil && c.Player == r.state.Host {
-		if !r.host.connected {
+// joinPlayingHost wires up a host who is ALSO a player: it claims the room's Host
+// role (configure / start / advance authority) and joins the player roster, so the
+// host draws, guesses, and scores like everyone else. There is no separate display
+// in this mode — every player, the host included, sees the drawing on their own
+// device. A connected host with a different name is rejected; the same name
+// returning while disconnected reconnects.
+func (r *Room) joinPlayingHost(c Command) {
+	name := c.Player
+	if r.state.Phase == PhaseEnded {
+		ack(c, "This game has already ended.")
+		return
+	}
+	if utf8.RuneCountInString(name) > maxNameLen {
+		ack(c, "That name is too long.")
+		return
+	}
+	// Reconnect: the host's own name returning while marked disconnected.
+	if name == r.state.Host {
+		if pr, ok := r.present[name]; ok {
+			if pr.connected {
+				ack(c, "This room already has a host.")
+				return
+			}
+			pr.connected = true
+			pr.gen++ // invalidate the pending host prune
+			r.addSub(name, c.Subscribe)
+			ack(c, "")
 			return
 		}
-		r.host.connected = false
-		r.host.gen++
-		r.armHostPrune(r.host.gen)
+	}
+	if r.state.Host != "" { // a different host already owns the room
+		ack(c, "This room already has a host.")
+		return
+	}
+	if r.state.playerIndex(name) >= 0 || r.present[name] != nil {
+		ack(c, "That name's already taken in this room.")
+		return
+	}
+	if len(r.state.Players) >= maxPlayers {
+		ack(c, "This room is full.")
+		return
+	}
+	r.state.Host = name
+	r.state.HostPlays = true
+	r.state.Players = append(r.state.Players, Player{Name: name})
+	r.present[name] = &presence{connected: true}
+	r.addSub(name, c.Subscribe)
+	r.cancelEmptyTimer()
+	ack(c, "")
+}
+
+func (r *Room) disconnect(c Command) {
+	r.unsubscribe(c.Unsub)
+	if c.Player == r.state.Host {
+		r.disconnectHost()
 		return
 	}
 	p, ok := r.present[c.Player]
@@ -102,6 +152,28 @@ func (r *Room) disconnect(c Command) {
 	p.connected = false
 	p.gen++
 	r.armPrune(c.Player, p.gen)
+}
+
+// disconnectHost marks the host (display TV or playing host) away and arms the
+// grace timer that ends the room if it doesn't come back. The host holds the
+// room's only advance authority, so losing it can't simply be ridden out.
+func (r *Room) disconnectHost() {
+	if r.state.HostPlays {
+		pr, ok := r.present[r.state.Host]
+		if !ok || !pr.connected {
+			return
+		}
+		pr.connected = false
+		pr.gen++
+		r.armHostPrune(pr.gen)
+		return
+	}
+	if r.host == nil || !r.host.connected {
+		return
+	}
+	r.host.connected = false
+	r.host.gen++
+	r.armHostPrune(r.host.gen)
 }
 
 // armHostPrune schedules a reap if the host display doesn't return within grace.
@@ -123,18 +195,68 @@ func (r *Room) prune(c Command) {
 }
 
 // leave removes a participant immediately at their own request (the Leave
-// button), skipping the disconnect grace. A host leaving closes the shared
-// screen and ends the game; a player leaving reaps an emptied room.
+// button), skipping the disconnect grace. The host leaving hands the room to
+// another player rather than ending it (see hostDeparted); a player leaving reaps
+// an emptied room.
 func (r *Room) leave(c Command) {
 	r.unsubscribe(c.Unsub)
-	if r.host != nil && c.Player == r.state.Host {
-		r.closeRoom()
+	if c.Player == r.state.Host {
+		r.hostDeparted()
 		return
 	}
 	if _, ok := r.present[c.Player]; !ok {
 		return // never present, or already gone
 	}
 	r.removePlayer(c.Player)
+}
+
+// hostDeparted handles the host leaving for good (an explicit leave, or gone past
+// the disconnect grace). Instead of ending the room, it hands control to another
+// connected player: that player becomes a *playing* host (HostPlays=true), so the
+// game continues on everyone's own device with no shared screen. Only when no one
+// is left to take over does the room close. Mirrors removePlayer's mid-round
+// bookkeeping (below-minimum bounce, early phase completion) for the departure.
+func (r *Room) hostDeparted() {
+	old := r.state.Host
+	// Drop the departing host: clear the display-host presence and remove the
+	// playing host from presence + roster.
+	r.host = nil
+	delete(r.present, old)
+	if i := r.state.playerIndex(old); i >= 0 {
+		r.state.Players = append(r.state.Players[:i], r.state.Players[i+1:]...)
+	}
+
+	// Promote the longest-standing connected player.
+	newHost := ""
+	for _, p := range r.state.Players {
+		if pr, ok := r.present[p.Name]; ok && pr.connected {
+			newHost = p.Name
+			break
+		}
+	}
+	if newHost == "" {
+		r.closeRoom() // nobody to take over
+		return
+	}
+	r.state.Host = newHost
+	r.state.HostPlays = true // the new host is a player; the room loses its TV
+
+	// A host departure can drop a running game below the minimum (bounce to lobby)
+	// or complete the current phase for those who remain.
+	if r.state.Phase.inGame() && len(r.state.Players) < minPlayers {
+		r.returnToLobby()
+		return
+	}
+	switch r.state.Phase {
+	case PhaseDrawing:
+		if r.allLocked() {
+			r.beginGuessing()
+		}
+	case PhaseGuessing:
+		if r.allGuessed() {
+			r.beginReveal()
+		}
+	}
 }
 
 // closeRoom tears the room down when the host departs. It sends a final frame
@@ -200,5 +322,27 @@ func (r *Room) connectedCount() int {
 	return n
 }
 
-// hostConnected reports whether the host display is currently attached.
-func (r *Room) hostConnected() bool { return r.host != nil && r.host.connected }
+// hostConnected reports whether the host is currently attached — the playing
+// host's player presence in play mode, else the display host's presence.
+func (r *Room) hostConnected() bool {
+	if r.state.HostPlays {
+		pr, ok := r.present[r.state.Host]
+		return ok && pr.connected
+	}
+	return r.host != nil && r.host.connected
+}
+
+// hostGen returns the current generation of the host's presence, so a host-prune
+// timer can self-cancel after a reconnect bumps it.
+func (r *Room) hostGen() int {
+	if r.state.HostPlays {
+		if pr, ok := r.present[r.state.Host]; ok {
+			return pr.gen
+		}
+		return -1
+	}
+	if r.host != nil {
+		return r.host.gen
+	}
+	return -1
+}

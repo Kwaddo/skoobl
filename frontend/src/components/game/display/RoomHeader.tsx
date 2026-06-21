@@ -35,7 +35,10 @@ export function RoomHeader({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <span className="hidden items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 sm:flex">
+        <span
+          className="sticker hidden px-3 py-1.5 sm:flex"
+          style={{ "--rot": "-2deg" } as React.CSSProperties}
+        >
           <span className="live-dot h-2 w-2 rounded-full bg-foreground" />
           <span className="font-mono text-xs uppercase tracking-widest text-muted">
             {phase === "lobby" || phase === "ended"

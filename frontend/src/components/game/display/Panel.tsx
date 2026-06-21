@@ -19,7 +19,7 @@ export function Panel({
       {(title || aside) && (
         <div className="mb-3 flex shrink-0 items-baseline justify-between gap-3">
           {title && (
-            <h2 className="font-display text-lg font-bold sm:text-xl">
+            <h2 className="ink-underline font-display text-lg font-black sm:text-xl">
               {title}
             </h2>
           )}
