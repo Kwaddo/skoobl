@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCountdown } from "@/hooks/use-countdown";
+import { useActiveEffects } from "@/hooks/use-effects";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { downloadStrokesPng, pngFilename } from "@/lib/canvas";
 import type { Stroke } from "@/lib/protocol";
@@ -81,6 +82,7 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
   const connected = useGameStore((s) => s.connected);
   const mode = useGameStore((s) => s.mode);
   const remaining = useCountdown(endsAt);
+  const effects = useActiveEffects();
   const [submitted, setSubmitted] = useState(false);
   const strokesRef = useRef<Stroke[]>([]);
 
@@ -144,6 +146,7 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <DrawingCanvas
+            effects={effects}
             onChange={(s) => {
               strokesRef.current = s;
             }}

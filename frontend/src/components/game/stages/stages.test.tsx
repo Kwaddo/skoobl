@@ -329,6 +329,24 @@ describe("stage split", () => {
     expect(fired).toEqual(["fog"]);
   });
 
+  it("frenzy fog overlays the drawing canvas; cramp disables input", () => {
+    useGameStore.setState({
+      phase: "drawing",
+      mode: "frenzy",
+      players: [{ name: "ann" }],
+      yourPrompt: "cat",
+      yourEffects: [
+        { kind: "fog", endsAt: Date.now() + 5000, from: "bob" },
+        { kind: "cramp", endsAt: Date.now() + 5000, from: "bob" },
+      ],
+    });
+    const { container } = render(<PlayerStage name="ann" actions={noopActions} />);
+    // Fog overlay is present over the canvas area.
+    expect(container.querySelector('[data-effect="fog"]')).not.toBeNull();
+    // Cramp disables the canvas (the dim/opacity class the disabled canvas uses).
+    expect(container.querySelector("canvas.opacity-70")).not.toBeNull();
+  });
+
   it("frenzy tray toasts incoming effects and still toasts after a round reset", () => {
     useGameStore.setState({
       phase: "drawing",
