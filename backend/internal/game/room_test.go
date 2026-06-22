@@ -1303,7 +1303,7 @@ func syncRoom(t *testing.T, players ...string) *Room {
 }
 
 func draft(r *Room, name string) {
-	r.handle(Command{Kind: CmdDraftDrawing, Player: name, Strokes: []Stroke{
+	r.handle(Command{Kind: CmdDraftAppend, Player: name, Strokes: []Stroke{
 		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
 	}})
 }
@@ -1700,6 +1700,35 @@ func TestFlippedPoolDropsRevealedTarget(t *testing.T) {
 	}
 }
 
+func TestFlippedPoolOrderedById(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	guesser := "alice"
+	if r.state.Featured == "alice" {
+		guesser = "bob"
+	}
+
+	v := r.state.viewFor(guesser, r.present)
+	if len(v.Pool) < 2 {
+		t.Fatalf("pool size = %d, want the full candidate set", len(v.Pool))
+	}
+	// The grid is shuffled by sorting on the opaque per-round id, decoupling a
+	// doodle's slot from roster order. Verify ascending-id order.
+	for i := 1; i < len(v.Pool); i++ {
+		if v.Pool[i-1].ID >= v.Pool[i].ID {
+			t.Fatalf("pool not ordered by id: %q is not before %q", v.Pool[i-1].ID, v.Pool[i].ID)
+		}
+	}
+	// Ids are fixed for the round, so the order is stable across broadcasts —
+	// tiles never jump mid-round. A second view yields the identical sequence.
+	v2 := r.state.viewFor(guesser, r.present)
+	for i := range v.Pool {
+		if v.Pool[i].ID != v2.Pool[i].ID {
+			t.Fatalf("pool order changed between views at %d: %q vs %q", i, v.Pool[i].ID, v2.Pool[i].ID)
+		}
+	}
+}
+
 func TestEmptyLockInIsNotADrawing(t *testing.T) {
 	r := syncRoom(t, "alice", "bob", "carol", "dave")
 	draft(r, "alice") // one real drawing
@@ -1848,5 +1877,123 @@ func guessAllCorrect(r *Room, names []string, target string) {
 			continue
 		}
 		r.handle(Command{Kind: CmdSubmitGuess, Player: n, GuessID: id})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Draft append/replace tests
+// ---------------------------------------------------------------------------
+
+// makePoints builds a slice of n points all at (1,1).
+func makePoints(n int) []Point {
+	pts := make([]Point, n)
+	for i := range pts {
+		pts[i] = Point{X: 1, Y: 1}
+	}
+	return pts
+}
+
+// newDrawingRoomWithSub starts a room with 4 players in the drawing phase and
+// returns it plus p1's broadcast channel.
+func newDrawingRoomWithSub(t *testing.T) (*Room, chan GameState) {
+	t.Helper()
+	r := NewRoom("draftsub1")
+	go r.Run()
+	t.Cleanup(r.Stop)
+
+	sub := make(chan GameState, 32)
+	joinSpec(t, r, "tv", make(chan GameState, 32))
+	joinOK(t, r, "p1", sub)
+	joinOK(t, r, "p2", make(chan GameState, 32))
+	joinOK(t, r, "p3", make(chan GameState, 32))
+	joinOK(t, r, "p4", make(chan GameState, 32))
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, sub, PhaseDrawing)
+	return r, sub
+}
+
+func drainOne(t *testing.T, ch chan GameState) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected a broadcast to drain")
+	}
+}
+
+// drawingsFor synchronously reads a player's stored draft via the test-only
+// cmdTestReadDrawing probe command.
+func drawingsFor(t *testing.T, r *Room, name string) []Stroke {
+	t.Helper()
+	done := make(chan []Stroke, 1)
+	r.Submit(Command{Kind: cmdTestReadDrawing, Player: name, probe: done})
+	select {
+	case got := <-done:
+		return got
+	case <-time.After(time.Second):
+		t.Fatal("probe timed out")
+		return nil
+	}
+}
+
+func TestDraftAppendIsSilent(t *testing.T) {
+	r, sub := newDrawingRoomWithSub(t)
+	drain(sub) // drain any remaining broadcasts from entering the drawing phase
+
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
+	}})
+	// Use the test probe as a flush barrier: it is processed silently (no
+	// broadcast) after the draft, confirming the room goroutine has processed
+	// both commands before we assert silence.
+	_ = drawingsFor(t, r, "p1")
+
+	select {
+	case <-sub:
+		t.Fatal("draft append must not broadcast")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestDraftAppendAccumulates(t *testing.T) {
+	r, _ := newDrawingRoomWithSub(t)
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+	}})
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 5, Y: 5}}},
+	}})
+	got := drawingsFor(t, r, "p1")
+	if len(got) != 2 {
+		t.Fatalf("want 2 accumulated strokes, got %d", len(got))
+	}
+}
+
+func TestDraftReplaceOverwrites(t *testing.T) {
+	r, _ := newDrawingRoomWithSub(t)
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 2, Y: 2}}},
+	}})
+	r.Submit(Command{Kind: CmdDraftReplace, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 9, Y: 9}}},
+	}})
+	got := drawingsFor(t, r, "p1")
+	if len(got) != 1 || got[0].Points[0].X != 9 {
+		t.Fatalf("replace should overwrite to a single stroke, got %#v", got)
+	}
+}
+
+func TestAppendBoundedStrokesCapsTotalPoints(t *testing.T) {
+	cur := []Stroke{{Color: "#ffffff", Width: 4, Points: makePoints(maxPointsTotal - 1)}}
+	add := []Stroke{{Color: "#ffffff", Width: 4, Points: makePoints(10)}}
+	out := appendBoundedStrokes(cur, add)
+	total := 0
+	for _, s := range out {
+		total += len(s.Points)
+	}
+	if total > maxPointsTotal {
+		t.Fatalf("combined points %d exceeds cap %d", total, maxPointsTotal)
 	}
 }

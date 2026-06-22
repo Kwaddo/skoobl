@@ -151,7 +151,8 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
             onChange={(s) => {
               strokesRef.current = s;
             }}
-            onStrokeEnd={(s) => actions.draftDrawing(s)}
+            onDraftAppend={(s) => actions.draftAppend(s)}
+            onDraftReplace={(s) => actions.draftReplace(s)}
             footer={
               <button
                 type="button"
@@ -230,6 +231,9 @@ export function PlayerGuessing({
   const shownOptions = effects.has("shuffle")
     ? [...options].reverse()
     : options;
+  // hidenames masks each option's name + avatar, so the victim must guess from
+  // the drawing alone with no roster to read off.
+  const hideNames = effects.has("hidenames");
   // Play-along rooms show the drawing inline, so desktop gets a two-pane split
   // (drawing beside the guess list); otherwise it's a single centred column.
   const showDrawing = hostPlays && !youAreArtist;
@@ -303,9 +307,18 @@ export function PlayerGuessing({
                   className="card-arcade card-hover card-press pop flex h-full w-full items-center gap-2 p-3 text-left"
                   style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
                 >
-                  <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
-                  <span dir="auto" className="truncate font-semibold">
-                    {p.name}
+                  {hideNames ? (
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-foreground/10 font-display text-lg font-black text-muted">
+                      ?
+                    </span>
+                  ) : (
+                    <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
+                  )}
+                  <span
+                    dir="auto"
+                    className={`truncate font-semibold ${hideNames ? "select-none blur-sm" : ""}`}
+                  >
+                    {hideNames ? "???" : p.name}
                   </span>
                 </button>
               </li>

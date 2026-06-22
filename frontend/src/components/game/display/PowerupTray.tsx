@@ -12,6 +12,7 @@ const META: Record<Powerup, { label: string; icon: string }> = {
   squint: { label: "Squint", icon: "😵" },
   curtain: { label: "Curtain", icon: "🎭" },
   shuffle: { label: "Shuffle", icon: "🔀" },
+  hidenames: { label: "No Names", icon: "🕵️" },
 };
 
 // PowerupTray is the Frenzy fire UI: a row of held powerups. Tapping one fires it

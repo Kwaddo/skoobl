@@ -90,6 +90,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Mode">
         <Segmented
           value={gameMode}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={[
             { value: "classic" as const, label: "Classic" },
             { value: "flipped" as const, label: "Whose Doodle" },
@@ -117,6 +119,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Category language">
         <Segmented
           value={language}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={[
             { value: "en" as const, label: "English" },
             { value: "ar" as const, label: "العربية" },
@@ -131,6 +135,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Draw time">
         <Segmented
           value={drawSec}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={DRAW_TIME_OPTIONS.map((s) => ({ value: s, label: `${s}s` }))}
           onChange={(v) => {
             setDrawSec(v);
@@ -142,6 +148,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Guess time">
         <Segmented
           value={guessSec}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={GUESS_TIME_OPTIONS.map((s) => ({
             value: s,
             label: `${s}s`,
@@ -156,6 +164,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Categories">
         <Segmented
           value={mode}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={[
             { value: "random" as const, label: "Random" },
             { value: "custom" as const, label: "Custom" },
@@ -170,6 +180,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Save everyone's art here">
         <Segmented
           value={saveGallery ? "on" : "off"}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={[
             { value: "off" as const, label: "Off" },
             { value: "on" as const, label: "On" },

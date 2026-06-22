@@ -1,10 +1,14 @@
+import { lazy, Suspense } from "react";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { useGameStore } from "@/lib/store";
-import { CodeCard } from "../display/CodeCard";
 import { EndedStage } from "../display/EndedStage";
 import { PlayerGrid } from "../display/PlayerList";
 import { HostConfig } from "./HostConfig";
 import { PlayerDrawing, PlayerGuessing, PlayerReveal } from "./PlayerStage";
+
+const CodeCard = lazy(() =>
+  import("../display/CodeCard").then((m) => ({ default: m.CodeCard })),
+);
 
 const MIN_PLAYERS = 4;
 
@@ -67,7 +71,9 @@ function PlayingHostLobby({ actions }: { actions: GameActions }) {
             /down) and the QR's tape strip (≈11px up) so the scroll clip doesn't
             shear them */}
         <div className="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:px-2 lg:pt-3 lg:pb-2">
-          <CodeCard code={code} />
+          <Suspense fallback={null}>
+            <CodeCard code={code} />
+          </Suspense>
           {/* plain wrapper gives HostConfig an indefinite height so it sizes to its
               content here instead of trying to fill the column like on the TV */}
           <div className="shrink-0">

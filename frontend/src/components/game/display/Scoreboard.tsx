@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Player } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 import { Avatar, Check, Crown } from "../icons";
@@ -5,7 +6,10 @@ import { Avatar, Check, Crown } from "../icons";
 // Scoreboard ranks players by score, marking the leader and correct guessers.
 export function Scoreboard({ players }: { players: Player[] }) {
   const host = useGameStore((s) => s.host);
-  const ranked = [...players].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const ranked = useMemo(
+    () => [...players].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+    [players],
+  );
   return (
     <ol className="flex flex-col gap-2">
       {ranked.map((p, i) => {

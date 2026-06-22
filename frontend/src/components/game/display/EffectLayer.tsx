@@ -3,8 +3,8 @@ import type { Powerup } from "@/lib/protocol";
 // EffectLayer wraps content and renders Frenzy perception effects over it: blur
 // (squint) and 180° flip (topsy-turvy) as transforms on the content, and fog /
 // lights-out / curtain as pointer-transparent overlays (so input still passes
-// through — the victim draws/guesses "blind"). Cramp and shuffle are input/data
-// effects handled by consumers, not here.
+// through — the victim draws/guesses "blind"). Cramp, shuffle and hidenames are
+// input/data effects handled by consumers, not here.
 export function EffectLayer({
   effects,
   children,

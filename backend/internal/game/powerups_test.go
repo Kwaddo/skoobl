@@ -38,14 +38,17 @@ func TestActiveEffectsPrunesExpired(t *testing.T) {
 	}
 }
 
-func TestGrantDropsRespectsCapAndConnection(t *testing.T) {
+func TestGrantDropsTrickleRespectsCapAndConnection(t *testing.T) {
 	r := syncRoom(t, "alice", "bob", "carol", "dave")
 	r.state.Mode = ModeFrenzy
 
-	// Grant repeatedly; nobody exceeds the cap.
-	for i := 0; i < inventoryCap+3; i++ {
+	// Each tick arms exactly one player (not the whole room). Until everyone is
+	// capped, every tick adds exactly one powerup to the room total.
+	const ticks = inventoryCap + 3 // 6 < 4*cap, so no tick is wasted on a full room
+	for i := 0; i < ticks; i++ {
 		r.grantDrops(PhaseDrawing)
 	}
+	total := 0
 	for name, held := range r.state.Inventory {
 		if len(held) > inventoryCap {
 			t.Fatalf("%s holds %d powerups, over cap %d", name, len(held), inventoryCap)
@@ -55,9 +58,31 @@ func TestGrantDropsRespectsCapAndConnection(t *testing.T) {
 				t.Fatalf("%s holds %q, not a draw-phase powerup", name, p)
 			}
 		}
+		total += len(held)
 	}
-	if len(r.state.Inventory["alice"]) != inventoryCap {
-		t.Fatalf("alice holds %d, want the cap %d after many drops", len(r.state.Inventory["alice"]), inventoryCap)
+	if total != ticks {
+		t.Fatalf("granted %d powerups across the room, want one per tick = %d", total, ticks)
+	}
+}
+
+func TestGrantDropsStopsWhenAllCapped(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Mode = ModeFrenzy
+
+	// Drive every player to the cap, then keep ticking: no over-cap, no growth.
+	capped := len(r.state.Players) * inventoryCap
+	for i := 0; i < capped+5; i++ {
+		r.grantDrops(PhaseDrawing)
+	}
+	total := 0
+	for name, held := range r.state.Inventory {
+		if len(held) != inventoryCap {
+			t.Fatalf("%s holds %d, want the cap %d once the room saturates", name, len(held), inventoryCap)
+		}
+		total += len(held)
+	}
+	if total != capped {
+		t.Fatalf("room holds %d powerups, want the saturated total %d", total, capped)
 	}
 }
 
@@ -92,6 +117,35 @@ func frenzyGuessing(t *testing.T, names ...string) *Room {
 	return r
 }
 
+func TestStartPhasePrunesStalePowerups(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := syncRoom(t, names...)
+	r.state.Mode = ModeFrenzy
+
+	// During drawing, players hold draw-phase powerups (alice at the cap). These
+	// can't fire during guessing and must not linger in the guessing-phase tray,
+	// nor eat inventory slots that should fill with guess-phase drops.
+	r.state.Inventory = map[string][]Powerup{
+		"alice": {PowerFog, PowerLights, PowerCramp},
+		"bob":   {PowerFlip},
+	}
+	for _, n := range names {
+		draft(r, n)
+	}
+	r.advance() // drawing → guessing
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing", r.state.Phase)
+	}
+
+	for name, held := range r.state.Inventory {
+		for _, p := range held {
+			if powerupCatalog[p].phase != PhaseGuessing {
+				t.Fatalf("%s still holds %q after entering guessing — stale powerup not pruned", name, p)
+			}
+		}
+	}
+}
+
 func TestFireLandsOnRivalAndConsumes(t *testing.T) {
 	names := []string{"alice", "bob", "carol", "dave"}
 	r := frenzyGuessing(t, names...)
@@ -118,6 +172,67 @@ func TestFireLandsOnRivalAndConsumes(t *testing.T) {
 	}
 	if hit != 1 {
 		t.Fatalf("squint landed on %d rivals, want exactly 1", hit)
+	}
+}
+
+func TestFireSkipsLockedDrawers(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := syncRoom(t, names...)
+	r.state.Mode = ModeFrenzy
+	r.state.Phase = PhaseDrawing
+	r.state.Locked = map[string]bool{"bob": true, "carol": true} // only dave still drawing
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerFog, PowerFog, PowerFog}}
+
+	// Every hit must land on dave — the locked-in rivals are done and skipped.
+	for i := 0; i < 3; i++ {
+		r.handle(Command{Kind: CmdFirePowerup, Player: "alice", PowerupID: string(PowerFog)})
+	}
+	for victim := range r.state.Effects {
+		if victim != "dave" {
+			t.Fatalf("fog landed on %q, want only the unlocked drawer dave", victim)
+		}
+	}
+	if len(r.state.Effects["dave"]) == 0 {
+		t.Fatal("dave (unlocked) should have been hit")
+	}
+}
+
+func TestFireNoOpWhenAllRivalsLocked(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Mode = ModeFrenzy
+	r.state.Phase = PhaseDrawing
+	r.state.Locked = map[string]bool{"bob": true, "carol": true, "dave": true}
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerFog}}
+
+	r.handle(Command{Kind: CmdFirePowerup, Player: "alice", PowerupID: string(PowerFog)})
+
+	if len(r.state.Effects) != 0 {
+		t.Fatalf("no affectable rival — effect must not land, got %+v", r.state.Effects)
+	}
+	if len(r.state.Inventory["alice"]) != 1 {
+		t.Fatal("powerup must be kept when there's no eligible victim")
+	}
+}
+
+func TestFireSkipsGuessedAndFeatured(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := frenzyGuessing(t, names...)
+	// carol is the artist on show (doesn't guess); bob already guessed. Only dave
+	// is still guessing, so every squint must land on dave.
+	r.state.Featured = "carol"
+	r.state.Guesses = map[string]string{"bob": "x"}
+	r.state.Inventory = map[string][]Powerup{"alice": {PowerSquint, PowerSquint}}
+
+	for i := 0; i < 2; i++ {
+		r.handle(Command{Kind: CmdFirePowerup, Player: "alice", PowerupID: string(PowerSquint)})
+	}
+	for victim := range r.state.Effects {
+		if victim != "dave" {
+			t.Fatalf("squint landed on %q, want only dave (carol=featured, bob=guessed)", victim)
+		}
+	}
+	if len(r.state.Effects["dave"]) == 0 {
+		t.Fatal("dave (still guessing) should have been hit")
 	}
 }
 

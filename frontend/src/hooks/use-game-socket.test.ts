@@ -61,11 +61,6 @@ describe("useGameSocket", () => {
         { color: "#fff", width: 4, points: [{ x: 1, y: 2 }] },
       ]),
     );
-    act(() =>
-      result.current.draftDrawing([
-        { color: "#0f0", width: 4, points: [{ x: 3, y: 4 }] },
-      ]),
-    );
     expect(MockSocket.last.emitted).toContainEqual({ event: "start" });
     expect(MockSocket.last.emitted).toContainEqual({ event: "returnToLobby" });
     expect(MockSocket.last.emitted).toContainEqual({
@@ -78,12 +73,35 @@ describe("useGameSocket", () => {
         strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 2 }] }],
       },
     });
-    expect(MockSocket.last.emitted).toContainEqual({
-      event: "draftDrawing",
-      payload: {
-        strokes: [{ color: "#0f0", width: 4, points: [{ x: 3, y: 4 }] }],
-      },
+  });
+
+  it("emits draftAppend and draftReplace", () => {
+    // Capture emitted events as [event, payload] tuples (matching the brief's assertion format)
+    const emitted: Array<[string, unknown]> = [];
+    const { result } = renderHook(() => useGameSocket("ABCD", "p1"));
+    // Patch the mock socket to record in [event, payload] format
+    const sock = MockSocket.last;
+    const origEmit = sock.emit.bind(sock);
+    sock.emit = (event: string, payload?: unknown) => {
+      origEmit(event, payload);
+      emitted.push([event, payload]);
+    };
+    act(() => {
+      result.current.draftAppend([
+        { color: "#fff", width: 4, points: [{ x: 1, y: 1 }] },
+      ]);
+      result.current.draftReplace([
+        { color: "#fff", width: 4, points: [{ x: 2, y: 2 }] },
+      ]);
     });
+    expect(emitted).toContainEqual([
+      "draftAppend",
+      { strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }] },
+    ]);
+    expect(emitted).toContainEqual([
+      "draftReplace",
+      { strokes: [{ color: "#fff", width: 4, points: [{ x: 2, y: 2 }] }] },
+    ]);
   });
 
   it("emits a spectator join for the host", () => {
