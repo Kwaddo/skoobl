@@ -100,13 +100,13 @@ type Reveal struct {
 	Prompt string `json:"prompt"` // the word they were asked to draw
 }
 
-// ActiveEffect is a Frenzy effect currently inflicted on a victim: which
-// powerup, when it expires (unix ms, absolute), and who fired it (for the
-// victim's toast). Stored per-victim, redacted to that victim only.
+// ActiveEffect is a Frenzy effect currently inflicted on a player: which effect
+// and when it expires (unix ms, absolute). Effects arrive in room-wide waves
+// rather than from a specific attacker. Stored per-player, redacted to that
+// player only.
 type ActiveEffect struct {
 	Kind   Powerup `json:"kind"`
 	EndsAt int64   `json:"endsAt"`
-	From   string  `json:"from"`
 }
 
 // PoolDrawing is one anonymized candidate in flipped guessing: a stable per-round
@@ -166,8 +166,7 @@ type GameState struct {
 	GuessTimes    map[string]int64          `json:"guessTimes,omitempty"`    // guesser → unix-ms of their latest guess
 	LastDeltas    map[string]int            `json:"lastDeltas,omitempty"`    // player → points earned in the round just scored
 	DrawIDs       map[string]string         `json:"drawIds,omitempty"`       // flipped: per-round opaque id per drawer (name→id); server-only, redacted by viewFor
-	Inventory     map[string][]Powerup      `json:"inventory,omitempty"`     // frenzy: player → held powerups; server-only
-	Effects       map[string][]ActiveEffect `json:"effects,omitempty"`       // frenzy: victim → active effects; server-only
+	Effects       map[string][]ActiveEffect `json:"effects,omitempty"`       // frenzy: player → active effects; server-only
 
 	// View-only fields, populated by viewFor. Never set on the authoritative
 	// state, so they marshal away (omitempty) in the persisted snapshot.
@@ -185,9 +184,8 @@ type GameState struct {
 	// on show, still secret). Sent to guessers so the UI drops them from the "who
 	// drew it?" options — each player draws once, so a revealed artist can't be
 	// the answer to a later drawing in the same round.
-	Revealed     []string       `json:"revealed,omitempty"`
-	YourPowerups []Powerup      `json:"yourPowerups,omitempty"` // frenzy: this recipient's held powerups
-	YourEffects  []ActiveEffect `json:"yourEffects,omitempty"`  // frenzy: this recipient's active effects
+	Revealed    []string       `json:"revealed,omitempty"`
+	YourEffects []ActiveEffect `json:"yourEffects,omitempty"` // frenzy: this recipient's active effects
 	// Closed is the final frame the room sends when the host leaves: the room is
 	// gone and clients should kick everyone back to the main menu.
 	Closed bool `json:"closed,omitempty"`
@@ -359,11 +357,7 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		}
 	}
 	if g.Mode == ModeFrenzy {
-		now := time.Now().UnixMilli()
-		if held := g.Inventory[name]; len(held) > 0 {
-			v.YourPowerups = append([]Powerup(nil), held...)
-		}
-		if live := activeEffects(g.Effects[name], now); len(live) > 0 {
+		if live := activeEffects(g.Effects[name], time.Now().UnixMilli()); len(live) > 0 {
 			v.YourEffects = live
 		}
 	}

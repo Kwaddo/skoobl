@@ -41,11 +41,10 @@ export type Powerup =
   | "shuffle"
   | "hidenames";
 
-// An active effect inflicted on this client.
+// An active effect inflicted on this client by a Frenzy effect wave.
 export interface ActiveEffect {
   kind: Powerup;
   endsAt: number;
-  from: string;
 }
 
 // One anonymized candidate doodle in flipped guessing.
@@ -114,8 +113,8 @@ export interface GameState {
   roundFeatured?: string[];
   // Final frame sent when the host leaves: the room is gone, kick to the menu.
   closed?: boolean;
-  // Frenzy-mode recipient-specific fields.
-  yourPowerups?: Powerup[];
+  // Frenzy-mode recipient-specific field: effects currently inflicted on this
+  // client by the room-wide effect waves.
   yourEffects?: ActiveEffect[];
 }
 

@@ -19,8 +19,8 @@ describe("useActiveEffects", () => {
     act(() => {
       useGameStore.setState({
         yourEffects: [
-          { kind: "fog", endsAt: Date.now() + 5000, from: "bob" },
-          { kind: "squint", endsAt: Date.now() - 5000, from: "carol" },
+          { kind: "fog", endsAt: Date.now() + 5000 },
+          { kind: "squint", endsAt: Date.now() - 5000 },
         ],
       });
     });
@@ -33,7 +33,7 @@ describe("useActiveEffects", () => {
     // Set up an active effect well into the future so it won't expire during the test
     act(() => {
       useGameStore.setState({
-        yourEffects: [{ kind: "fog", endsAt: Date.now() + 60000, from: "bob" }],
+        yourEffects: [{ kind: "fog", endsAt: Date.now() + 60000 }],
       });
     });
 

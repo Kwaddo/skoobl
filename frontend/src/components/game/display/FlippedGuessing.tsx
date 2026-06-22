@@ -19,7 +19,6 @@ export function FlippedGuessing({
   featureCount,
   onPick,
   effects = new Set<Powerup>(),
-  tray,
 }: {
   target: string;
   pool: PoolDrawing[];
@@ -31,7 +30,6 @@ export function FlippedGuessing({
   featureCount: number;
   onPick?: (id: string) => void;
   effects?: Set<Powerup>;
-  tray?: React.ReactNode;
 }) {
   const shuffled = effects.has("shuffle")
     ? [...pool].sort((a, b) => a.id.localeCompare(b.id)).reverse()
@@ -52,8 +50,6 @@ export function FlippedGuessing({
         </div>
         <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
       </div>
-
-      {tray}
 
       {youAreTarget ? (
         <p className="ink-block tilt-r flex items-center justify-center gap-2 px-5 py-6 text-center font-hand text-2xl leading-tight text-muted">
@@ -76,7 +72,7 @@ export function FlippedGuessing({
                   type="button"
                   disabled={!onPick}
                   onClick={() => onPick?.(d.id)}
-                  className="card-arcade card-hover card-press pop tape block aspect-[4/3] w-full overflow-hidden p-1"
+                  className="card-arcade card-hover card-press pop tape block aspect-4/3 w-full overflow-hidden p-1"
                   style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
                 >
                   <StrokesView strokes={d.strokes} className="h-full w-full" />
