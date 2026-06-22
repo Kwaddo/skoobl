@@ -60,11 +60,19 @@ export function DrawingCanvas({
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
   const rectRef = useRef<DOMRect | null>(null);
-  // Offscreen buffer holding every stroke committed BEFORE the active one. While
-  // drawing we restore this and repaint only the live stroke each frame, so the
-  // speculative predicted tail can be wiped and redrawn with zero cost to the
-  // committed picture (and no double-painting of overlapping segments).
+  // Offscreen baseline buffer holding every stroke committed BEFORE the active
+  // one. While drawing we restore this and repaint only the live stroke over it
+  // each frame, so overlapping segments of the stroke are never double-painted.
   const offRef = useRef<HTMLCanvasElement | null>(null);
+  // Offscreen compositor. Each frame we assemble `baseline + live stroke` here,
+  // then present the visible (desynchronized) canvas with a SINGLE drawImage of
+  // this buffer. A desynchronized backbuffer can scan out to the screen
+  // asynchronously to our JS, so wiping-then-repainting directly on it lets the
+  // display catch the half-cleared intermediate state (a tear/flicker on fast
+  // strokes). Composing off-screen and blitting once means the visible canvas
+  // only ever transitions between two complete frames — nothing half-drawn to
+  // tear to.
+  const frameRef = useRef<HTMLCanvasElement | null>(null);
   // Draft-sync bookkeeping: how many strokes the server already has, and whether
   // the last change was destructive (undo/clear → must replace, not append).
   const syncedRef = useRef(0);
@@ -96,7 +104,7 @@ export function DrawingCanvas({
     if (ctx) drawStrokes(ctx, strokesRef.current);
   }, [getCtx]);
 
-  // offCtx returns the offscreen buffer's context, allocating the buffer lazily.
+  // offCtx returns the offscreen baseline buffer's context, allocating lazily.
   const offCtx = useCallback(() => {
     let off = offRef.current;
     if (!off) {
@@ -106,6 +114,18 @@ export function DrawingCanvas({
       offRef.current = off;
     }
     return off.getContext("2d");
+  }, []);
+
+  // frameCtx returns the offscreen compositor's context, allocating lazily.
+  const frameCtx = useCallback(() => {
+    let frame = frameRef.current;
+    if (!frame) {
+      frame = document.createElement("canvas");
+      frame.width = CANVAS_W;
+      frame.height = CANVAS_H;
+      frameRef.current = frame;
+    }
+    return frame.getContext("2d");
   }, []);
 
   // snapshotCommitted copies the live canvas (everything already painted) into the
@@ -118,28 +138,37 @@ export function DrawingCanvas({
     octx.drawImage(main, 0, 0);
   }, [offCtx]);
 
-  // paintLive restores the committed baseline then repaints the in-progress stroke,
-  // optionally extended by a speculative `predicted` tail (future points drawn this
-  // frame to mask input latency; never stored — wiped on the next restore). Drawing
-  // the whole live stroke each frame keeps it pixel-identical to drawStrokes (so the
-  // smoothing matches what everyone else renders) at a cost of just one stroke.
-  const paintLive = useCallback(
-    (predicted: Point[]) => {
-      const ctx = getCtx();
-      if (!ctx) return;
-      const off = offRef.current;
-      if (!off) {
-        drawStrokes(ctx, strokesRef.current); // no buffer: full redraw, no prediction
-        return;
-      }
-      ctx.drawImage(off, 0, 0);
-      const cur = strokesRef.current[strokesRef.current.length - 1];
-      if (!cur || cur.fill) return;
-      const pts = predicted.length ? cur.points.concat(predicted) : cur.points;
-      strokePath(ctx, cur.color, cur.width, pts);
-    },
-    [getCtx],
-  );
+  // paintLive assembles one frame in the offscreen compositor — the committed
+  // baseline plus the in-progress stroke — then presents it to the visible
+  // (desynchronized) canvas in a SINGLE drawImage, so the screen never catches a
+  // half-cleared state mid-stroke (see frameRef). We draw only the REAL sampled
+  // points — no speculative predicted tail. Browser pointer prediction
+  // (getPredictedEvents) overshoots on fast strokes, painting a ghost line ahead
+  // of the cursor that flickers as it's corrected and wiped each frame; the
+  // coalesced real samples already keep fast strokes smooth, so prediction isn't
+  // worth that artifact. Drawing the whole live stroke each frame keeps it pixel-
+  // identical to drawStrokes (so smoothing matches what everyone else renders) at
+  // a cost of just one stroke.
+  const paintLive = useCallback(() => {
+    const ctx = getCtx();
+    if (!ctx) return;
+    const off = offRef.current;
+    const fctx = frameCtx();
+    const frame = frameRef.current;
+    if (!off || !fctx || !frame) {
+      drawStrokes(ctx, strokesRef.current); // no buffer yet: full redraw
+      return;
+    }
+    // Lay the opaque baseline down first — it covers the whole buffer, so it
+    // fully overwrites the prior frame and no clear is needed — then the live
+    // stroke over it.
+    fctx.drawImage(off, 0, 0);
+    const cur = strokesRef.current[strokesRef.current.length - 1];
+    if (cur && !cur.fill) {
+      strokePath(fctx, cur.color, cur.width, cur.points);
+    }
+    ctx.drawImage(frame, 0, 0); // single atomic present to the visible canvas
+  }, [getCtx, frameCtx]);
 
   // Paint the background once on mount and keep the cached rect fresh on resize
   // (instead of reading getBoundingClientRect on every pointer move).
@@ -255,7 +284,7 @@ export function DrawingCanvas({
     // Freeze the committed picture, then start the new stroke over that baseline.
     snapshotCommitted();
     strokesRef.current = [...strokesRef.current, { color, width, points: [p] }];
-    paintLive([]); // paints the initial dot
+    paintLive(); // paints the initial dot
   };
 
   const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -269,13 +298,7 @@ export function DrawingCanvas({
     for (const ev of coalesced) {
       cur.points.push(toCanvas(ev.clientX, ev.clientY));
     }
-    // Predicted events are the browser's extrapolation of where the pointer is
-    // about to be; painting them this frame hides input latency. They're guesses,
-    // so they're drawn but never stored, and wiped on the next frame.
-    const predicted = (native.getPredictedEvents?.() ?? []).map((ev) =>
-      toCanvas(ev.clientX, ev.clientY),
-    );
-    paintLive(predicted);
+    paintLive();
     // Mark the stroke live and sync it: onChange keeps the parent's copy current
     // (so an auto-submit at the buzzer captures the in-progress stroke), and the
     // throttled flush streams the draft for resilience if the drawer drops off.
@@ -287,7 +310,7 @@ export function DrawingCanvas({
   const end = () => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
-    paintLive([]); // settle on the real stroke, dropping any predicted tail
+    paintLive(); // settle on the final stroke
     commit();
   };
 
