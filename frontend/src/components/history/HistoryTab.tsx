@@ -130,7 +130,7 @@ function Thumbs({
               <img
                 src={t.drawing.thumb}
                 alt={t.title}
-                className="aspect-[4/3] w-full object-contain"
+                className="aspect-4/3 w-full object-contain"
               />
             ) : (
               <StrokesView strokes={t.drawing.strokes} />
