@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
   buildSavedGame,
-  clearGameId,
   currentGameId,
   getSaveGalleryPref,
   renderThumb,
@@ -23,10 +22,9 @@ export function useDrawingHistory(code: string, you: string): void {
   const thumbCache = useRef(new WeakMap<Stroke[], string>());
 
   useEffect(() => {
-    // Back in the lobby a fresh game begins: drop the session id so the next
-    // game gets its own saved entry, and forget cached thumbs.
+    // Back in the lobby a fresh game begins: forget cached thumbs. The saved-game
+    // id is derived from code + date, so there is nothing else to reset.
     if (phase === "lobby") {
-      clearGameId();
       thumbCache.current = new WeakMap();
       return;
     }

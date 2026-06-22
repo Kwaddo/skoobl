@@ -616,6 +616,19 @@ canvas {
   animation-delay: var(--d, 0ms);
 }
 
+/* plain fade — for dimmed overlay backdrops behind a popping panel */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 0.2s var(--ease-out-soft) both;
+}
+
 /* stick-on: a sticker thwacked onto the page at its resting angle (overshoot) */
 @keyframes stick-on {
   0% {

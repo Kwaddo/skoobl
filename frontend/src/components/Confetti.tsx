@@ -54,9 +54,7 @@ export function Confetti() {
 function Shard({ kind, size }: { kind: number; size: number }) {
   const base = { width: size, height: size };
   if (kind === 0) {
-    return (
-      <span className="block rotate-12 bg-foreground" style={base} />
-    );
+    return <span className="block rotate-12 bg-foreground" style={base} />;
   }
   if (kind === 1) {
     return (

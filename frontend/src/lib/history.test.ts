@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSavedGame,
   clearHistory,
+  currentGameId,
   deleteGame,
   getSaveGalleryPref,
+  historyPngName,
   loadHistory,
   MAX_GAMES,
   type SavedGame,
@@ -194,5 +196,69 @@ describe("buildSavedGame", () => {
     expect(buildSavedGame({ ...input, saveGallery: false })).toBeNull();
     const g = buildSavedGame({ ...input, saveGallery: true });
     expect(g?.gallery?.[1]?.bob.thumb).toBe("thumb:1");
+  });
+  it("excludes the host (you) from gallery; host art stays only in mine", () => {
+    const stroke = [{ color: "#fff", width: 5, points: [{ x: 1, y: 1 }] }];
+    const g = buildSavedGame({
+      id: "a:2026-06-22",
+      code: "a",
+      you: "Host",
+      playedAt: 7,
+      myDrawings: { 1: stroke },
+      galleryHistory: {
+        1: { Host: stroke, bob: stroke },
+      },
+      saveGallery: true,
+      thumb,
+    });
+    expect(g).not.toBeNull();
+    // Host's own art lives in mine...
+    // biome-ignore lint/style/noNonNullAssertion: g asserted non-null above
+    expect(Object.keys(g!.mine)).toEqual(["1"]);
+    // ...and the gallery holds only the OTHER artists.
+    // biome-ignore lint/style/noNonNullAssertion: gallery present when saveGallery true with art
+    expect(Object.keys(g!.gallery![1])).toEqual(["bob"]);
+  });
+});
+
+describe("currentGameId", () => {
+  it("is deterministic per code+local-day (YYYY-MM-DD)", () => {
+    vi.useFakeTimers();
+    // A fixed local wall-clock instant.
+    vi.setSystemTime(new Date(2026, 5, 22, 9, 30, 0)); // 2026-06-22 local
+    const id = currentGameId("OD57CF");
+    expect(id).toMatch(/^OD57CF:\d{4}-\d{2}-\d{2}$/);
+    expect(id.endsWith(":2026-06-22")).toBe(true);
+    // Same day, later time → same id (so a replay merges).
+    vi.setSystemTime(new Date(2026, 5, 22, 23, 0, 0));
+    expect(currentGameId("OD57CF")).toBe(id);
+    vi.useRealTimers();
+  });
+
+  it("changes with the room code and with the day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 22, 12, 0, 0));
+    const a = currentGameId("AAA");
+    expect(currentGameId("BBB")).not.toBe(a);
+    vi.setSystemTime(new Date(2026, 5, 23, 12, 0, 0));
+    expect(currentGameId("AAA")).not.toBe(a);
+    vi.useRealTimers();
+  });
+});
+
+describe("historyPngName", () => {
+  it("names own art with code and round", () => {
+    expect(historyPngName("OD57CF", 2)).toBe("skoobl-OD57CF-round2.png");
+  });
+  it("names gallery art with a slugified artist", () => {
+    expect(historyPngName("OD57CF", 1, "Alice")).toBe(
+      "skoobl-OD57CF-round1-alice.png",
+    );
+    expect(historyPngName("OD57CF", 3, "Big Bob 99!")).toBe(
+      "skoobl-OD57CF-round3-big-bob-99.png",
+    );
+  });
+  it("treats an empty artist as own art", () => {
+    expect(historyPngName("AAA", 1, "")).toBe("skoobl-AAA-round1.png");
   });
 });

@@ -38,7 +38,8 @@ export type Powerup =
   | "cramp"
   | "squint"
   | "curtain"
-  | "shuffle";
+  | "shuffle"
+  | "hidenames";
 
 // An active effect inflicted on this client.
 export interface ActiveEffect {

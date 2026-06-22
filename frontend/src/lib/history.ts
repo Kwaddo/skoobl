@@ -23,7 +23,6 @@ export interface SavedGame {
 export const MAX_GAMES = 20;
 const KEY = "skoobl:history";
 const PREF_KEY = "skoobl:savegallery";
-const GAME_ID_KEY = "skoobl:gameid";
 const THUMB_W = 240;
 const THUMB_H = 180;
 
@@ -131,6 +130,22 @@ export function renderThumb(strokes: Stroke[]): string {
   }
 }
 
+// historyPngName builds the download filename for a saved drawing: the room
+// code and round, plus a slugified artist name for gallery art (own art has
+// none). Slug = lowercase, non-alphanumerics collapsed to single dashes.
+export function historyPngName(
+  code: string,
+  round: number,
+  artist?: string,
+): string {
+  const base = `skoobl-${code}-round${round}`;
+  const slug = (artist ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug ? `${base}-${slug}.png` : `${base}.png`;
+}
+
 export function getSaveGalleryPref(): boolean {
   try {
     return localStorage.getItem(PREF_KEY) === "1";
@@ -147,27 +162,13 @@ export function setSaveGalleryPref(on: boolean): void {
   }
 }
 
-// currentGameId returns this game-session's stable id, minting one on first use
-// and keeping it in sessionStorage so a reload mid-game re-targets the same
-// saved entry. Cleared back in the lobby via clearGameId.
+// currentGameId is this game's stable id: the room code plus the local
+// calendar date (YYYY-MM-DD). Deterministic, so replaying the same room on the
+// same day merges into one saved entry instead of piling up new cards.
 export function currentGameId(code: string): string {
-  try {
-    const existing = sessionStorage.getItem(GAME_ID_KEY);
-    if (existing) return existing;
-    const id = `${code}:${Date.now()}`;
-    sessionStorage.setItem(GAME_ID_KEY, id);
-    return id;
-  } catch {
-    return `${code}:0`;
-  }
-}
-
-export function clearGameId(): void {
-  try {
-    sessionStorage.removeItem(GAME_ID_KEY);
-  } catch {
-    /* nothing to clear */
-  }
+  const d = new Date();
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${code}:${day}`;
 }
 
 interface BuildInput {
@@ -208,6 +209,9 @@ export function buildSavedGame(input: BuildInput): SavedGame | null {
     for (const [rStr, byArtist] of Object.entries(galleryHistory)) {
       const roundMap: Record<string, SavedDrawing> = {};
       for (const [artist, strokes] of Object.entries(byArtist)) {
+        // The host's own art is already stored in `mine`; never duplicate it
+        // into the gallery.
+        if (artist === you) continue;
         if (!strokes.length) continue;
         roundMap[artist] = { prompt: "", strokes, thumb: thumb(strokes) };
       }

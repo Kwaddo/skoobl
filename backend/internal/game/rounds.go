@@ -384,6 +384,7 @@ func (r *Room) startPhase(p Phase, durMs int) {
 	r.state.Phase = p
 	r.phaseGen++
 	r.state.Effects = nil // effects are phase-scoped — none carry across a transition
+	r.pruneInventory(p)   // powerups are phase-scoped too — drop any not fireable in p
 	if durMs > 0 {
 		d := time.Duration(durMs) * time.Millisecond
 		r.state.PhaseEndsAt = time.Now().Add(d).UnixMilli()

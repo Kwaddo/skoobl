@@ -18,9 +18,10 @@ const (
 	PowerCramp  Powerup = "cramp"  // block drawing input briefly
 
 	// Guess-phase powerups (disrupt the victim's guessing).
-	PowerSquint  Powerup = "squint"  // blur the drawing(s) on show
-	PowerCurtain Powerup = "curtain" // hide the drawing behind a curtain
-	PowerShuffle Powerup = "shuffle" // jumble the guess options' order
+	PowerSquint    Powerup = "squint"    // blur the drawing(s) on show
+	PowerCurtain   Powerup = "curtain"   // hide the drawing behind a curtain
+	PowerShuffle   Powerup = "shuffle"   // jumble the guess options' order
+	PowerHideNames Powerup = "hidenames" // mask the guess options' names + avatars
 )
 
 // powerupSpec is a powerup's phase and effect duration (ms).
@@ -34,16 +35,17 @@ var powerupCatalog = map[Powerup]powerupSpec{
 	PowerLights:  {PhaseDrawing, 2500},
 	PowerFlip:    {PhaseDrawing, 3000},
 	PowerCramp:   {PhaseDrawing, 2000},
-	PowerSquint:  {PhaseGuessing, 3000},
-	PowerCurtain: {PhaseGuessing, 2000},
-	PowerShuffle: {PhaseGuessing, 2000},
+	PowerSquint:    {PhaseGuessing, 3000},
+	PowerCurtain:   {PhaseGuessing, 2000},
+	PowerShuffle:   {PhaseGuessing, 2000},
+	PowerHideNames: {PhaseGuessing, 3000},
 }
 
 // Explicit per-phase pools (deterministic order, unlike map iteration) used by
 // the drop ticker to pick what to hand out.
 var (
 	drawPowerups  = []Powerup{PowerFog, PowerLights, PowerFlip, PowerCramp}
-	guessPowerups = []Powerup{PowerSquint, PowerCurtain, PowerShuffle}
+	guessPowerups = []Powerup{PowerSquint, PowerCurtain, PowerShuffle, PowerHideNames}
 )
 
 // powerupsForPhase lists the powerups droppable/fireable in a phase.
@@ -58,8 +60,39 @@ func powerupsForPhase(p Phase) []Powerup {
 	}
 }
 
-// grantDrops gives every connected player one random powerup eligible for the
-// current phase, up to inventoryCap. Players already at the cap are skipped.
+// pruneInventory drops every held powerup not fireable in phase p, so a player
+// only ever sees (and can only fire) powerups for the current phase. Without this
+// a leftover draw-phase item would clutter the guessing tray, fail to fire, and
+// occupy a slot that should fill with a guess-phase drop. Phases with no pool
+// (reveal/lobby) clear the inventory entirely.
+func (r *Room) pruneInventory(p Phase) {
+	if len(r.state.Inventory) == 0 {
+		return
+	}
+	valid := map[Powerup]bool{}
+	for _, pw := range powerupsForPhase(p) {
+		valid[pw] = true
+	}
+	for name, held := range r.state.Inventory {
+		kept := held[:0]
+		for _, pw := range held {
+			if valid[pw] {
+				kept = append(kept, pw)
+			}
+		}
+		if len(kept) == 0 {
+			delete(r.state.Inventory, name)
+			continue
+		}
+		r.state.Inventory[name] = kept
+	}
+}
+
+// grantDrops hands a single random powerup to one random connected player who is
+// under the cap. Only one player is armed per tick (not the whole room), so
+// arsenals build slowly and the recipient varies tick to tick — powerups stay
+// scarce and unpredictable. A no-op when nobody is eligible (all capped or
+// disconnected) or the phase has no pool.
 func (r *Room) grantDrops(phase Phase) {
 	pool := powerupsForPhase(phase)
 	if len(pool) == 0 {
@@ -68,6 +101,7 @@ func (r *Room) grantDrops(phase Phase) {
 	if r.state.Inventory == nil {
 		r.state.Inventory = map[string][]Powerup{}
 	}
+	var eligible []string
 	for _, p := range r.state.Players {
 		pr, ok := r.present[p.Name]
 		if !ok || !pr.connected {
@@ -76,8 +110,13 @@ func (r *Room) grantDrops(phase Phase) {
 		if len(r.state.Inventory[p.Name]) >= inventoryCap {
 			continue
 		}
-		r.state.Inventory[p.Name] = append(r.state.Inventory[p.Name], pool[rand.IntN(len(pool))])
+		eligible = append(eligible, p.Name)
 	}
+	if len(eligible) == 0 {
+		return
+	}
+	name := eligible[rand.IntN(len(eligible))]
+	r.state.Inventory[name] = append(r.state.Inventory[name], pool[rand.IntN(len(pool))])
 }
 
 // firePowerup validates a fire and applies the powerup's effect to a random
@@ -99,7 +138,7 @@ func (r *Room) firePowerup(c Command) {
 	if !r.hasPowerup(c.Player, pw) {
 		return
 	}
-	victim := r.randomRival(c.Player)
+	victim := r.randomVictim(c.Player)
 	if victim == "" {
 		return
 	}
@@ -133,21 +172,48 @@ func (r *Room) consumePowerup(name string, pw Powerup) {
 	}
 }
 
-// randomRival returns a random connected player other than self, or "" if none.
-func (r *Room) randomRival(self string) string {
+// randomVictim returns a random connected rival who can still feel an effect this
+// phase, or "" if none. A player who already locked in their drawing (or already
+// guessed / is the featured artist) is done for the phase, so firing at them just
+// wastes the powerup — they're skipped so the hit always lands on someone active.
+func (r *Room) randomVictim(self string) string {
 	var rivals []string
 	for _, p := range r.state.Players {
 		if p.Name == self {
 			continue
 		}
-		if pr, ok := r.present[p.Name]; ok && pr.connected {
-			rivals = append(rivals, p.Name)
+		pr, ok := r.present[p.Name]
+		if !ok || !pr.connected {
+			continue
 		}
+		if !r.affectable(p.Name) {
+			continue
+		}
+		rivals = append(rivals, p.Name)
 	}
 	if len(rivals) == 0 {
 		return ""
 	}
 	return rivals[rand.IntN(len(rivals))]
+}
+
+// affectable reports whether a powerup fired now would actually disrupt name in
+// the current phase. While drawing, a locked-in player has nothing left to
+// sabotage; while guessing, the featured artist doesn't guess and a player who
+// already guessed is done.
+func (r *Room) affectable(name string) bool {
+	switch r.state.Phase {
+	case PhaseDrawing:
+		return !r.state.Locked[name]
+	case PhaseGuessing:
+		if name == r.state.Featured {
+			return false
+		}
+		_, guessed := r.state.Guesses[name]
+		return !guessed
+	default:
+		return false
+	}
 }
 
 // activeEffects returns the still-live effects (EndsAt strictly after now).

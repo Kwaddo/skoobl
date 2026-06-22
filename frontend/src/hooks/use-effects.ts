@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { now as serverTime } from "@/lib/clock";
 import type { Powerup } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
@@ -17,5 +17,15 @@ export function useActiveEffects(): Set<Powerup> {
   }, [effects]);
 
   const t = serverTime();
-  return new Set(effects.filter((e) => e.endsAt > t).map((e) => e.kind));
+  const active = effects.filter((e) => e.endsAt > t);
+  // `kinds` is a stable primitive key: the Set reference only changes when the
+  // sorted list of active effect kinds changes. This intentionally omits `active`
+  // from the dep array because we want identity stability across sub-second ticks.
+  const kinds = active
+    .map((e) => e.kind)
+    .sort()
+    .join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — keyed on `kinds` (a derived primitive) to stabilise the Set reference across ticks when active kinds are unchanged
+  const set = useMemo(() => new Set(active.map((e) => e.kind)), [kinds]);
+  return set;
 }

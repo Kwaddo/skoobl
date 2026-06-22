@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { floodFill, hexToRgba, pngFilename } from "./canvas";
+import { floodFill, hexToRgba, pngFilename, rgbToHex } from "./canvas";
 
 describe("hexToRgba", () => {
   it("parses #rrggbb", () => {
@@ -7,6 +7,20 @@ describe("hexToRgba", () => {
   });
   it("parses #rgb shorthand", () => {
     expect(hexToRgba("#0f0")).toEqual([0, 255, 0, 255]);
+  });
+});
+
+describe("rgbToHex", () => {
+  it("formats channels as lowercase #rrggbb", () => {
+    expect(rgbToHex(255, 0, 0)).toBe("#ff0000");
+    expect(rgbToHex(0, 255, 0)).toBe("#00ff00");
+  });
+  it("zero-pads single-digit channels", () => {
+    expect(rgbToHex(1, 2, 3)).toBe("#010203");
+  });
+  it("round-trips a sampled pixel back through hexToRgba", () => {
+    const [r, g, b] = hexToRgba("#5ad1ff"); // a palette cyan
+    expect(rgbToHex(r, g, b)).toBe("#5ad1ff");
   });
 });
 

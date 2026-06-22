@@ -1,6 +1,9 @@
 package game
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // Phase is the room's lifecycle stage.
 //
@@ -218,8 +221,16 @@ func (g *GameState) revealedExcept(current string) []string {
 
 // flippedPool builds the anonymized candidate list for flipped guessing: every
 // drawer whose doodle is still in play this round (not an already-revealed
-// target), keyed by opaque id, in stable roster order. The current target's
-// doodle is included but unlabeled — that's the one to find.
+// target), keyed by opaque id. The current target's doodle is included but
+// unlabeled — that's the one to find.
+//
+// The list is ordered by the opaque per-round id rather than roster order. Ids
+// are random and re-assigned each round (see assignDrawIDs), so this shuffles
+// the grid independently of who joined when — the slot a doodle lands in never
+// hints at its owner. Because the ids are fixed for the round, the order is
+// stable across every broadcast and across the round's successive targets, so
+// tiles never jump mid-round; it re-shuffles only when the next round mints new
+// ids.
 func (g *GameState) flippedPool() []PoolDrawing {
 	revealed := map[string]bool{}
 	for _, n := range g.revealedExcept(g.Featured) {
@@ -232,6 +243,7 @@ func (g *GameState) flippedPool() []PoolDrawing {
 		}
 		pool = append(pool, PoolDrawing{ID: g.DrawIDs[p.Name], Strokes: g.Drawings[p.Name]})
 	}
+	sort.Slice(pool, func(i, j int) bool { return pool[i].ID < pool[j].ID })
 	return pool
 }
 

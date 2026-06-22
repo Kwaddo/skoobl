@@ -18,7 +18,9 @@ const (
 	CmdConfigure     // host: set rounds/categories/language/timers (lobby only)
 	CmdStart         // host: lobby → drawing (requires minPlayers)
 	CmdSubmitDrawing // player: lock in strokes during the drawing phase
-	CmdDraftDrawing  // player: stream in-progress strokes (no lock, no advance)
+	CmdDraftAppend   // player: append in-progress strokes (silent: no broadcast/persist)
+	CmdDraftReplace  // player: replace in-progress strokes (undo/clear; silent)
+	cmdTestReadDrawing // test-only: synchronously read a player's stored draft via probe
 	CmdSubmitGuess   // player: guess the artist during the guessing phase
 	CmdNextPhase     // host: reveal → next round / ended
 	CmdReturnToLobby // host: ended → lobby (play again, keep players)
@@ -53,9 +55,10 @@ const (
 	// guessesForPlayers). At maxPlayers this is the value the scale already lands on.
 	maxFeatures = 5
 
-	// dropInterval is how often Frenzy hands every player a fresh powerup while
-	// drawing or guessing. inventoryCap bounds a player's held powerups.
-	dropInterval = 8 * time.Second
+	// dropInterval is how often Frenzy arms one random under-cap player with a
+	// fresh powerup while drawing or guessing. Kept long so powerups stay scarce
+	// and hard-won. inventoryCap bounds a player's held powerups.
+	dropInterval = 20 * time.Second
 	inventoryCap = 3
 
 	// Round configuration bounds and defaults.
@@ -131,6 +134,10 @@ type Command struct {
 	GuessID   string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
 	Config    *Config  // configure
 	PowerupID string   // firePowerup: the powerup kind being fired
+
+	// probe is a test-only channel used by cmdTestReadDrawing to synchronously
+	// return a copy of a player's stored draft strokes. Always nil in production.
+	probe chan []Stroke
 }
 
 // Snapshotter persists a room's serialized state. Implemented by
@@ -231,12 +238,14 @@ func (r *Room) Run() {
 		case <-r.done:
 			return
 		case c := <-r.cmds:
-			r.handle(c)
+			dirty := r.handle(c)
 			if r.isDone() {
 				return // reaped inside handle; skip broadcast/persist
 			}
-			r.broadcast()
-			r.persist()
+			if dirty {
+				r.broadcast()
+				r.persist()
+			}
 		}
 	}
 }
@@ -328,7 +337,7 @@ func (r *Room) isDone() bool {
 	}
 }
 
-func (r *Room) handle(c Command) {
+func (r *Room) handle(c Command) bool {
 	switch c.Kind {
 	case CmdJoin:
 		r.join(c)
@@ -359,8 +368,12 @@ func (r *Room) handle(c Command) {
 		}
 	case CmdSubmitDrawing:
 		r.submitDrawing(c)
-	case CmdDraftDrawing:
-		r.draftDrawing(c)
+	case CmdDraftAppend:
+		r.draftAppend(c)
+		return false
+	case CmdDraftReplace:
+		r.draftReplace(c)
+		return false
 	case CmdSubmitGuess:
 		r.submitGuess(c)
 	case CmdNextPhase:
@@ -386,5 +399,11 @@ func (r *Room) handle(c Command) {
 			r.grantDrops(r.state.Phase)
 			r.armDrop(r.phaseGen, dropInterval)
 		}
+	case cmdTestReadDrawing:
+		if c.probe != nil {
+			c.probe <- append([]Stroke(nil), r.state.Drawings[c.Player]...)
+		}
+		return false
 	}
+	return true
 }

@@ -1,10 +1,10 @@
+import { lazy, Suspense, useMemo } from "react";
 import { Confetti } from "@/components/Confetti";
 import { useCountdown } from "@/hooks/use-countdown";
 import type { GameActions } from "@/hooks/use-game-socket";
 import type { Stroke } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 import { StrokesView } from "../canvas/StrokesView";
-import { CodeCard } from "../display/CodeCard";
 import { DrawingCarousel } from "../display/DrawingCarousel";
 import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
@@ -16,6 +16,10 @@ import { Scoreboard } from "../display/Scoreboard";
 import { Timer } from "../display/Timer";
 import { Brush, Scribble, Trophy } from "../icons";
 import { HostConfig } from "./HostConfig";
+
+const CodeCard = lazy(() =>
+  import("../display/CodeCard").then((m) => ({ default: m.CodeCard })),
+);
 
 const MIN_PLAYERS = 4;
 
@@ -68,6 +72,13 @@ function HostEnded({ name, actions }: { name: string; actions: GameActions }) {
     }
   }
 
+  // Must be before the early return to satisfy the rules of hooks.
+  const ranked = useMemo(
+    () => [...players].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+    [players],
+  );
+  const winner = ranked[0];
+
   if (items.length === 0) {
     return (
       <EndedStage
@@ -78,11 +89,8 @@ function HostEnded({ name, actions }: { name: string; actions: GameActions }) {
     );
   }
 
-  const ranked = [...players].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const winner = ranked[0];
-
   return (
-    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
+    <div className="flex flex-col gap-6 lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[1.6fr_1fr]">
       {winner && <Confetti />}
       <DrawingCarousel items={items} />
       <div className="flex min-h-0 flex-col gap-4">
@@ -104,7 +112,7 @@ function HostEnded({ name, actions }: { name: string; actions: GameActions }) {
             </span>
           )}
         </div>
-        <Panel className="flex-1" title="Final scores">
+        <Panel className="lg:flex-1" title="Final scores">
           <Scoreboard players={players} />
         </Panel>
         <button
@@ -126,12 +134,14 @@ function HostLobby({ actions }: { actions: GameActions }) {
   const canStart = connected >= MIN_PLAYERS;
 
   return (
-    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+    <div className="flex flex-col gap-6 lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[1.05fr_0.95fr]">
       {/* left: share the code + see who's in */}
       <div className="flex min-h-0 flex-col gap-5">
-        <CodeCard code={code} />
+        <Suspense fallback={null}>
+          <CodeCard code={code} />
+        </Suspense>
         <Panel
-          className="flex-1"
+          className="lg:flex-1"
           title="In the lobby"
           aside={
             <span
@@ -148,7 +158,7 @@ function HostLobby({ actions }: { actions: GameActions }) {
 
       {/* right: settings + start */}
       <div className="flex min-h-0 flex-col gap-5">
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex flex-col lg:min-h-0 lg:flex-1">
           <HostConfig actions={actions} />
         </div>
         <button
@@ -177,7 +187,7 @@ function HostDrawing() {
   const drawn = players.filter((p) => p.locked).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5">
+    <div className="flex flex-col gap-5 lg:h-full lg:min-h-0">
       <div className="flex shrink-0 items-center justify-between gap-3">
         <div className="flex flex-col items-start gap-1.5">
           <span
@@ -196,7 +206,7 @@ function HostDrawing() {
         <Timer remaining={remaining} total={Math.round(drawMs / 1000)} />
       </div>
       <Panel
-        className="flex-1"
+        className="lg:flex-1"
         title="Sketching…"
         aside={
           <span className="font-mono text-sm text-muted">
@@ -242,7 +252,7 @@ function HostGuessing() {
   const eligible = Math.max(players.length - 1, 0);
 
   return (
-    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
+    <div className="flex flex-col gap-6 lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[1.6fr_1fr]">
       <div className="flex min-h-0 flex-col gap-4">
         <div className="flex shrink-0 items-center justify-between gap-3">
           <div className="flex flex-col gap-2">
@@ -257,13 +267,13 @@ function HostGuessing() {
             featured drawing wipes up into focus instead of swapping in place */}
         <div
           key={featureIndex}
-          className={`tape reveal-clip flex-1 ${HOST_CANVAS_BOX}`}
+          className={`tape reveal-clip aspect-4/3 lg:aspect-auto lg:min-h-0 lg:flex-1 ${HOST_CANVAS_BOX}`}
         >
           <StrokesView strokes={drawing} className={HOST_CANVAS} />
         </div>
       </div>
       <Panel
-        className="flex-1"
+        className="lg:flex-1"
         title="Players"
         aside={
           <span className="font-mono text-sm text-muted">
@@ -307,10 +317,10 @@ function HostReveal({ actions }: { actions: GameActions }) {
   const noArtist = !reveal?.artist;
 
   return (
-    <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.6fr_1fr]">
+    <div className="flex flex-col gap-6 lg:grid lg:h-full lg:min-h-0 lg:grid-cols-[1.6fr_1fr]">
       {noArtist ? (
         <div
-          className={`flex flex-col items-center justify-center gap-3 p-8 text-center ${HOST_CANVAS_BOX}`}
+          className={`flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center lg:min-h-0 ${HOST_CANVAS_BOX}`}
         >
           <Brush className="h-12 w-12 text-muted" />
           <p className="font-display text-2xl font-black">
@@ -327,7 +337,7 @@ function HostReveal({ actions }: { actions: GameActions }) {
         <div className="flex min-h-0 min-w-0 flex-col gap-3">
           <div
             key={featureIndex}
-            className={`tape reveal-clip min-h-0 flex-1 ${HOST_CANVAS_BOX}`}
+            className={`tape reveal-clip aspect-4/3 lg:aspect-auto lg:min-h-0 lg:flex-1 ${HOST_CANVAS_BOX}`}
           >
             <StrokesView strokes={drawing} className={HOST_CANVAS} />
           </div>
@@ -430,7 +440,7 @@ function HostReveal({ actions }: { actions: GameActions }) {
           )}
         </div>
 
-        <Panel className="flex-1" title="Leaderboard">
+        <Panel className="lg:flex-1" title="Leaderboard">
           <Scoreboard players={players} />
         </Panel>
 

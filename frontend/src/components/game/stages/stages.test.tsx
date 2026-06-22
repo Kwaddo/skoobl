@@ -12,7 +12,8 @@ const noopActions = {
   returnToLobby: () => {},
   leave: () => {},
   submitDrawing: () => {},
-  draftDrawing: () => {},
+  draftAppend: () => {},
+  draftReplace: () => {},
   submitGuess: () => {},
   submitDoodleGuess: () => {},
   firePowerup: () => {},
@@ -340,7 +341,9 @@ describe("stage split", () => {
         { kind: "cramp", endsAt: Date.now() + 5000, from: "bob" },
       ],
     });
-    const { container } = render(<PlayerStage name="ann" actions={noopActions} />);
+    const { container } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
     // Fog overlay is present over the canvas area.
     expect(container.querySelector('[data-effect="fog"]')).not.toBeNull();
     // Cramp disables the canvas (the dim/opacity class the disabled canvas uses).
@@ -356,13 +359,48 @@ describe("stage split", () => {
       youAreTarget: false,
       players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
       pool: [
-        { id: "d1", strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }] },
-        { id: "d2", strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }] },
+        {
+          id: "d1",
+          strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+        },
+        {
+          id: "d2",
+          strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
+        },
       ],
-      yourEffects: [{ kind: "curtain", endsAt: Date.now() + 5000, from: "bob" }],
+      yourEffects: [
+        { kind: "curtain", endsAt: Date.now() + 5000, from: "bob" },
+      ],
     });
-    const { container } = render(<PlayerStage name="ann" actions={noopActions} />);
+    const { container } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
     expect(container.querySelector('[data-effect="curtain"]')).not.toBeNull();
+  });
+
+  it("frenzy hidenames masks the guess option names", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "frenzy",
+      players: [
+        { name: "ann" },
+        { name: "bob", hasDrawn: true },
+        { name: "carol", hasDrawn: true },
+      ],
+      revealed: [],
+      pool: [],
+      youAreArtist: false,
+      yourEffects: [
+        { kind: "hidenames", endsAt: Date.now() + 5000, from: "bob" },
+      ],
+    });
+    const { getAllByText, queryByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // Both candidate names are hidden behind a placeholder, not readable.
+    expect(queryByText("bob")).toBeNull();
+    expect(queryByText("carol")).toBeNull();
+    expect(getAllByText("???").length).toBe(2);
   });
 
   it("frenzy tray toasts incoming effects and still toasts after a round reset", () => {
@@ -383,7 +421,9 @@ describe("stage split", () => {
       });
     });
     expect(
-      useGameStore.getState().notices.some((n) => n.text === "bob hit you with Fog!"),
+      useGameStore
+        .getState()
+        .notices.some((n) => n.text === "bob hit you with Fog!"),
     ).toBe(true);
 
     // Round reset: yourEffects clears (new round starts).
@@ -395,11 +435,15 @@ describe("stage split", () => {
     // seen.current was stale under the old guard (effects.length > seen.current).
     act(() => {
       useGameStore.setState({
-        yourEffects: [{ kind: "cramp", endsAt: Date.now() + 5000, from: "ann" }],
+        yourEffects: [
+          { kind: "cramp", endsAt: Date.now() + 5000, from: "ann" },
+        ],
       });
     });
     expect(
-      useGameStore.getState().notices.some((n) => n.text === "ann hit you with Cramp!"),
+      useGameStore
+        .getState()
+        .notices.some((n) => n.text === "ann hit you with Cramp!"),
     ).toBe(true);
   });
 });

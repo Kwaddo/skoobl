@@ -22,10 +22,10 @@ func (r *Room) submitDrawing(c Command) {
 	}
 }
 
-// draftDrawing stores a player's in-progress strokes without locking them in.
-// The server always holds the latest draft, so when the drawing timer expires
-// nothing is lost — whatever was drawn is kept and treated as the drawing.
-func (r *Room) draftDrawing(c Command) {
+// draftReplace overwrites a player's in-progress strokes (undo / clear / fill
+// rewrite). Silent: never broadcast or persisted. The server holds the latest
+// draft so the drawing-timer expiry keeps whatever was drawn.
+func (r *Room) draftReplace(c Command) {
 	if r.state.Phase != PhaseDrawing || r.state.playerIndex(c.Player) < 0 {
 		return
 	}
@@ -33,6 +33,18 @@ func (r *Room) draftDrawing(c Command) {
 		r.state.Drawings = map[string][]Stroke{}
 	}
 	r.state.Drawings[c.Player] = sanitizeStrokes(c.Strokes)
+}
+
+// draftAppend adds newly drawn strokes to a player's in-progress draft, bounding
+// the combined buffer against the stroke/point caps. Silent like draftReplace.
+func (r *Room) draftAppend(c Command) {
+	if r.state.Phase != PhaseDrawing || r.state.playerIndex(c.Player) < 0 {
+		return
+	}
+	if r.state.Drawings == nil {
+		r.state.Drawings = map[string][]Stroke{}
+	}
+	r.state.Drawings[c.Player] = appendBoundedStrokes(r.state.Drawings[c.Player], c.Strokes)
 }
 
 func (r *Room) submitGuess(c Command) {
