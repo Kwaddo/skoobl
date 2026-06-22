@@ -28,8 +28,7 @@ const (
 	CmdPrune
 	CmdReapIfEmpty
 	CmdHostPrune   // internal: host display gone past grace → reap
-	CmdFirePowerup // player: fire a held powerup at a random rival (frenzy)
-	CmdDropPowerup // internal: periodic powerup drop tick (frenzy)
+	CmdEffectWave  // internal: periodic frenzy effect wave (hits the whole room)
 )
 
 // Tunables.
@@ -55,11 +54,14 @@ const (
 	// guessesForPlayers). At maxPlayers this is the value the scale already lands on.
 	maxFeatures = 5
 
-	// dropInterval is how often Frenzy arms one random under-cap player with a
-	// fresh powerup while drawing or guessing. Kept long so powerups stay scarce
-	// and hard-won. inventoryCap bounds a player's held powerups.
-	dropInterval = 20 * time.Second
-	inventoryCap = 3
+	// Frenzy effect-wave cadence. While drawing or guessing, the room is hit by a
+	// wave that inflicts one random effect on every active player at once: the
+	// first wave lands firstEffectDelay into the phase, then every effectInterval
+	// after. Each effect lasts effectDurationMs — shorter than the interval, so
+	// waves never overlap and there's clear play between them.
+	firstEffectDelay = 5 * time.Second
+	effectInterval   = 15 * time.Second
+	effectDurationMs = 7000
 
 	// Round configuration bounds and defaults.
 	DefaultRounds  = 3
@@ -133,7 +135,6 @@ type Command struct {
 	Guess     string   // submitGuess: the guessed artist's name
 	GuessID   string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
 	Config    *Config  // configure
-	PowerupID string   // firePowerup: the powerup kind being fired
 
 	// probe is a test-only channel used by cmdTestReadDrawing to synchronously
 	// return a copy of a player's stored draft strokes. Always nil in production.
@@ -319,12 +320,12 @@ func (r *Room) armAdvance(gen int, d time.Duration) {
 	})
 }
 
-// armDrop schedules the next Frenzy drop tick. The captured generation makes the
-// timer a no-op once the phase changes (mirrors armAdvance), so drops naturally
-// stop when the round leaves drawing/guessing.
-func (r *Room) armDrop(gen int, d time.Duration) {
+// armWave schedules the next Frenzy effect wave. The captured generation makes
+// the timer a no-op once the phase changes (mirrors armAdvance), so waves
+// naturally stop when the round leaves drawing/guessing.
+func (r *Room) armWave(gen int, d time.Duration) {
 	time.AfterFunc(d, func() {
-		r.Submit(Command{Kind: CmdDropPowerup, Gen: gen})
+		r.Submit(Command{Kind: CmdEffectWave, Gen: gen})
 	})
 }
 
@@ -392,12 +393,10 @@ func (r *Room) handle(c Command) bool {
 		if c.Gen == r.phaseGen {
 			r.advance()
 		}
-	case CmdFirePowerup:
-		r.firePowerup(c)
-	case CmdDropPowerup:
+	case CmdEffectWave:
 		if c.Gen == r.phaseGen {
-			r.grantDrops(r.state.Phase)
-			r.armDrop(r.phaseGen, dropInterval)
+			r.applyEffectWave(r.state.Phase)
+			r.armWave(r.phaseGen, effectInterval)
 		}
 	case cmdTestReadDrawing:
 		if c.probe != nil {

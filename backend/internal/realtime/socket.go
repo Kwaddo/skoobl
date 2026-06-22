@@ -76,9 +76,6 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 			GuessID: strings.TrimSpace(stringField(args, "id")),
 		})
 	})
-	sock.On("firePowerup", func(args ...any) {
-		c.submit(game.Command{Kind: game.CmdFirePowerup, PowerupID: strings.TrimSpace(stringField(args, "id"))})
-	})
 	sock.On("leave", func(...any) { c.leaveRoom() })
 	sock.On("disconnect", func(...any) { c.onDisconnect() })
 }

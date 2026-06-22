@@ -346,7 +346,6 @@ func (r *Room) endGame() {
 	r.state.RoundFeatured = nil
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
-	r.state.Inventory = nil
 	r.state.Effects = nil
 }
 
@@ -369,7 +368,6 @@ func (r *Room) returnToLobby() {
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
 	r.state.FeaturedPast = nil
-	r.state.Inventory = nil
 	r.state.Effects = nil
 	for i := range r.state.Players {
 		r.state.Players[i].Score = 0
@@ -378,13 +376,12 @@ func (r *Room) returnToLobby() {
 
 // startPhase sets the phase, bumps the generation, and arms the advance timer for
 // timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown. In
-// Frenzy it also clears phase-scoped effects and arms the drop ticker for the
-// drawing/guessing phases.
+// Frenzy it also clears phase-scoped effects and arms the effect-wave ticker for
+// the drawing/guessing phases.
 func (r *Room) startPhase(p Phase, durMs int) {
 	r.state.Phase = p
 	r.phaseGen++
 	r.state.Effects = nil // effects are phase-scoped — none carry across a transition
-	r.pruneInventory(p)   // powerups are phase-scoped too — drop any not fireable in p
 	if durMs > 0 {
 		d := time.Duration(durMs) * time.Millisecond
 		r.state.PhaseEndsAt = time.Now().Add(d).UnixMilli()
@@ -393,6 +390,6 @@ func (r *Room) startPhase(p Phase, durMs int) {
 		r.state.PhaseEndsAt = 0
 	}
 	if r.state.Mode == ModeFrenzy && (p == PhaseDrawing || p == PhaseGuessing) {
-		r.armDrop(r.phaseGen, dropInterval)
+		r.armWave(r.phaseGen, firstEffectDelay)
 	}
 }

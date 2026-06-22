@@ -1,10 +1,11 @@
 import type { Powerup } from "@/lib/protocol";
 
 // EffectLayer wraps content and renders Frenzy perception effects over it: blur
-// (squint) and 180° flip (topsy-turvy) as transforms on the content, and fog /
-// lights-out / curtain as pointer-transparent overlays (so input still passes
-// through — the victim draws/guesses "blind"). Cramp, shuffle and hidenames are
-// input/data effects handled by consumers, not here.
+// (squint) and 180° flip (topsy-turvy) as transforms on the content; fog and
+// curtain as pointer-transparent overlays (so input still passes through — the
+// victim draws/guesses "blind"); and lights-out as a fully opaque, input-eating
+// blackout (the victim can neither see nor do anything until it clears). Cramp,
+// shuffle and hidenames are input/data effects handled by consumers, not here.
 export function EffectLayer({
   effects,
   children,
@@ -32,9 +33,12 @@ export function EffectLayer({
         />
       )}
       {effects.has("lights") && (
+        // Opaque + input-eating (no pointer-events-none): the victim sees nothing
+        // and every tap/drag is swallowed here, so they truly can't act for the
+        // effect's duration. touch-none also kills mobile scroll/draw gestures.
         <div
           data-effect="lights"
-          className="pointer-events-none absolute inset-0 bg-black/85"
+          className="absolute inset-0 touch-none cursor-not-allowed select-none bg-black"
         />
       )}
       {effects.has("curtain") && (

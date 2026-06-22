@@ -8,7 +8,6 @@ import type {
   Phase,
   Player,
   PoolDrawing,
-  Powerup,
   Reveal,
   Stroke,
 } from "./protocol";
@@ -62,7 +61,6 @@ interface GameStore {
   revealed: string[];
   roundFeatured: string[];
   closed: boolean;
-  yourPowerups: Powerup[];
   yourEffects: ActiveEffect[];
   notices: Notice[];
   self: string;
@@ -110,7 +108,6 @@ const initial = {
   revealed: [] as string[],
   roundFeatured: [] as string[],
   closed: false,
-  yourPowerups: [] as Powerup[],
   yourEffects: [] as ActiveEffect[],
   notices: [] as Notice[],
   self: "",
@@ -188,7 +185,6 @@ export const useGameStore = create<GameStore>((set) => ({
         revealed: s.revealed ?? [],
         roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,
-        yourPowerups: s.yourPowerups ?? [],
         yourEffects: s.yourEffects ?? [],
         notices,
       };

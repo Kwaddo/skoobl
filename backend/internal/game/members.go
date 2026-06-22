@@ -315,7 +315,6 @@ func (r *Room) clearRoundData(name string) {
 	delete(r.state.Locked, name)
 	delete(r.state.Guesses, name)
 	delete(r.state.GuessTimes, name)
-	delete(r.state.Inventory, name)
 	delete(r.state.Effects, name)
 }
 

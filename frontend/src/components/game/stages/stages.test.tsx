@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { useGameStore } from "@/lib/store";
@@ -16,7 +16,6 @@ const noopActions = {
   draftReplace: () => {},
   submitGuess: () => {},
   submitDoodleGuess: () => {},
-  firePowerup: () => {},
 } as unknown as GameActions;
 
 describe("stage split", () => {
@@ -310,26 +309,6 @@ describe("stage split", () => {
     expect(queryByText("bob")).toBeNull();
   });
 
-  it("frenzy tray shows held powerups and fires them", () => {
-    const fired: string[] = [];
-    const actions = {
-      ...noopActions,
-      firePowerup: (id: string) => fired.push(id),
-    } as unknown as GameActions;
-    useGameStore.setState({
-      phase: "drawing",
-      mode: "frenzy",
-      players: [{ name: "ann" }, { name: "bob" }],
-      yourPrompt: "cat",
-      yourPowerups: ["fog", "cramp"],
-    });
-    const { getByLabelText } = render(
-      <PlayerStage name="ann" actions={actions} />,
-    );
-    getByLabelText(/fire fog/i).click();
-    expect(fired).toEqual(["fog"]);
-  });
-
   it("frenzy fog overlays the drawing canvas; cramp disables input", () => {
     useGameStore.setState({
       phase: "drawing",
@@ -337,8 +316,8 @@ describe("stage split", () => {
       players: [{ name: "ann" }],
       yourPrompt: "cat",
       yourEffects: [
-        { kind: "fog", endsAt: Date.now() + 5000, from: "bob" },
-        { kind: "cramp", endsAt: Date.now() + 5000, from: "bob" },
+        { kind: "fog", endsAt: Date.now() + 5000 },
+        { kind: "cramp", endsAt: Date.now() + 5000 },
       ],
     });
     const { container } = render(
@@ -348,6 +327,25 @@ describe("stage split", () => {
     expect(container.querySelector('[data-effect="fog"]')).not.toBeNull();
     // Cramp disables the canvas (the dim/opacity class the disabled canvas uses).
     expect(container.querySelector("canvas.opacity-70")).not.toBeNull();
+  });
+
+  it("frenzy lights-out fully blacks out the canvas and eats input", () => {
+    useGameStore.setState({
+      phase: "drawing",
+      mode: "frenzy",
+      players: [{ name: "ann" }],
+      yourPrompt: "cat",
+      yourEffects: [{ kind: "lights", endsAt: Date.now() + 5000 }],
+    });
+    const { container } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    const overlay = container.querySelector('[data-effect="lights"]');
+    expect(overlay).not.toBeNull();
+    // Opaque blackout (not the old translucent bg-black/85) and input-eating
+    // (no pointer-events-none) — the victim can't see or draw.
+    expect(overlay?.className).toContain("bg-black");
+    expect(overlay?.className).not.toContain("pointer-events-none");
   });
 
   it("frenzy curtain covers the flipped doodle grid", () => {
@@ -368,9 +366,7 @@ describe("stage split", () => {
           strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
         },
       ],
-      yourEffects: [
-        { kind: "curtain", endsAt: Date.now() + 5000, from: "bob" },
-      ],
+      yourEffects: [{ kind: "curtain", endsAt: Date.now() + 5000 }],
     });
     const { container } = render(
       <PlayerStage name="ann" actions={noopActions} />,
@@ -390,9 +386,7 @@ describe("stage split", () => {
       revealed: [],
       pool: [],
       youAreArtist: false,
-      yourEffects: [
-        { kind: "hidenames", endsAt: Date.now() + 5000, from: "bob" },
-      ],
+      yourEffects: [{ kind: "hidenames", endsAt: Date.now() + 5000 }],
     });
     const { getAllByText, queryByText } = render(
       <PlayerStage name="ann" actions={noopActions} />,
@@ -403,47 +397,31 @@ describe("stage split", () => {
     expect(getAllByText("???").length).toBe(2);
   });
 
-  it("frenzy tray toasts incoming effects and still toasts after a round reset", () => {
+  it("frenzy squint blurs the guess options in TV-host mode (no drawing on the phone)", () => {
+    // hostPlays defaults to false (TV mode): the drawing is on the shared screen,
+    // so the option list is the only thing on the player's device. Squint must
+    // still impede it — otherwise it would be a no-op in the standard mode.
     useGameStore.setState({
-      phase: "drawing",
+      phase: "guessing",
       mode: "frenzy",
-      players: [{ name: "ann" }, { name: "bob" }],
-      yourPrompt: "cat",
-      yourPowerups: ["fog"],
-      yourEffects: [],
+      hostPlays: false,
+      players: [
+        { name: "ann" },
+        { name: "bob", hasDrawn: true },
+        { name: "carol", hasDrawn: true },
+      ],
+      revealed: [],
+      pool: [],
+      youAreArtist: false,
+      yourEffects: [{ kind: "squint", endsAt: Date.now() + 5000 }],
     });
-    render(<PlayerStage name="ann" actions={noopActions} />);
-
-    // Round 1: a fog effect arrives from bob.
-    act(() => {
-      useGameStore.setState({
-        yourEffects: [{ kind: "fog", endsAt: Date.now() + 5000, from: "bob" }],
-      });
-    });
-    expect(
-      useGameStore
-        .getState()
-        .notices.some((n) => n.text === "bob hit you with Fog!"),
-    ).toBe(true);
-
-    // Round reset: yourEffects clears (new round starts).
-    act(() => {
-      useGameStore.setState({ yourEffects: [] });
-    });
-
-    // Round 2: a cramp effect arrives from ann — must still toast even though
-    // seen.current was stale under the old guard (effects.length > seen.current).
-    act(() => {
-      useGameStore.setState({
-        yourEffects: [
-          { kind: "cramp", endsAt: Date.now() + 5000, from: "ann" },
-        ],
-      });
-    });
-    expect(
-      useGameStore
-        .getState()
-        .notices.some((n) => n.text === "ann hit you with Cramp!"),
-    ).toBe(true);
+    const { container, getByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // No drawing is shown on the phone in TV mode…
+    expect(container.querySelector("canvas")).toBeNull();
+    // …but the option list is blurred by the EffectLayer.
+    expect(container.querySelector(".blur-md")).not.toBeNull();
+    expect(getByText("bob")).toBeTruthy();
   });
 });

@@ -12,7 +12,6 @@ import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
 import { FlippedGuessing } from "../display/FlippedGuessing";
 import { PlayerGrid } from "../display/PlayerList";
-import { PowerupTray } from "../display/PowerupTray";
 import { Timer } from "../display/Timer";
 import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "../icons";
 
@@ -81,7 +80,6 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
   const drawMs = useGameStore((s) => s.drawMs);
   const recordDrawing = useGameStore((s) => s.recordDrawing);
   const connected = useGameStore((s) => s.connected);
-  const mode = useGameStore((s) => s.mode);
   const remaining = useCountdown(endsAt);
   const effects = useActiveEffects();
   const [submitted, setSubmitted] = useState(false);
@@ -131,8 +129,6 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
         </div>
         <Timer remaining={remaining} total={Math.round(drawMs / 1000)} />
       </div>
-
-      {mode === "frenzy" && <PowerupTray actions={actions} />}
 
       {submitted ? (
         <div className="ink-block tilt-l rise flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-10 text-center lg:mx-auto lg:max-w-2xl">
@@ -196,7 +192,6 @@ export function PlayerGuessing({
   const revealed = useGameStore((s) => s.revealed);
   const remaining = useCountdown(endsAt);
 
-  const mode = useGameStore((s) => s.mode);
   const target = useGameStore((s) => s.target);
   const pool = useGameStore((s) => s.pool);
   const youAreTarget = useGameStore((s) => s.youAreTarget);
@@ -216,7 +211,6 @@ export function PlayerGuessing({
         featureCount={featureCount}
         onPick={(id) => actions.submitDoodleGuess(id)}
         effects={effects}
-        tray={mode === "frenzy" ? <PowerupTray actions={actions} /> : null}
       />
     );
   }
@@ -260,8 +254,6 @@ export function PlayerGuessing({
         <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
       </div>
 
-      {mode === "frenzy" && <PowerupTray actions={actions} />}
-
       {/* `contents` keeps the mobile stack identical (no extra box); on desktop
           it becomes the two-pane row holding the drawing and the guess list */}
       <div className="contents lg:flex lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:gap-6">
@@ -292,38 +284,47 @@ export function PlayerGuessing({
             — waiting for the reveal…
           </p>
         ) : (
+          // In TV-host mode the drawing is on the shared screen, not here, so the
+          // option list is the only thing on the player's device — wrap it so
+          // Squint (blur) and Curtain (cover) actually impede guessing in every
+          // mode, not just play-along where the drawing is on the phone.
           // keyed by drawing so each new "who drew it?" re-staggers the choices in
-          <ul
+          <EffectLayer
             key={`options-${featureIndex}`}
-            className={`grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:auto-rows-min lg:content-start ${
-              showDrawing ? "lg:grid-cols-2" : "lg:grid-cols-4"
-            }`}
+            effects={effects}
+            className="min-h-0 flex-1"
           >
-            {shownOptions.map((p, i) => (
-              <li key={p.name}>
-                <button
-                  type="button"
-                  onClick={() => actions.submitGuess(p.name)}
-                  className="card-arcade card-hover card-press pop flex h-full w-full items-center gap-2 p-3 text-left"
-                  style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
-                >
-                  {hideNames ? (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-foreground/10 font-display text-lg font-black text-muted">
-                      ?
-                    </span>
-                  ) : (
-                    <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
-                  )}
-                  <span
-                    dir="auto"
-                    className={`truncate font-semibold ${hideNames ? "select-none blur-sm" : ""}`}
+            <ul
+              className={`grid h-full grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:auto-rows-min lg:content-start ${
+                showDrawing ? "lg:grid-cols-2" : "lg:grid-cols-4"
+              }`}
+            >
+              {shownOptions.map((p, i) => (
+                <li key={p.name}>
+                  <button
+                    type="button"
+                    onClick={() => actions.submitGuess(p.name)}
+                    className="card-arcade card-hover card-press pop flex h-full w-full items-center gap-2 p-3 text-left"
+                    style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
                   >
-                    {hideNames ? "???" : p.name}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+                    {hideNames ? (
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-foreground/10 font-display text-lg font-black text-muted">
+                        ?
+                      </span>
+                    ) : (
+                      <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
+                    )}
+                    <span
+                      dir="auto"
+                      className={`truncate font-semibold ${hideNames ? "select-none blur-sm" : ""}`}
+                    >
+                      {hideNames ? "???" : p.name}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </EffectLayer>
         )}
       </div>
     </div>
