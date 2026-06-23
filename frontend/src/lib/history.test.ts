@@ -139,7 +139,9 @@ describe("deleteGame / clearHistory", () => {
 });
 
 describe("gallery pref", () => {
-  it("defaults to false and round-trips", () => {
+  it("defaults to true (everyone archives the gallery) and round-trips an opt-out", () => {
+    expect(getSaveGalleryPref()).toBe(true);
+    setSaveGalleryPref(false);
     expect(getSaveGalleryPref()).toBe(false);
     setSaveGalleryPref(true);
     expect(getSaveGalleryPref()).toBe(true);

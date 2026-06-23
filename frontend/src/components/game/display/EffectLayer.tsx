@@ -4,8 +4,11 @@ import type { Powerup } from "@/lib/protocol";
 // (squint) and 180° flip (topsy-turvy) as transforms on the content; fog and
 // curtain as pointer-transparent overlays (so input still passes through — the
 // victim draws/guesses "blind"); and lights-out as a fully opaque, input-eating
-// blackout (the victim can neither see nor do anything until it clears). Cramp,
-// shuffle and hidenames are input/data effects handled by consumers, not here.
+// blackout (the victim can neither see nor do anything until it clears) that
+// jolts the box as it slams in. Cramp, shuffle and hidenames are input/data
+// effects handled by consumers, not here. Effects now arrive per-player on
+// staggered timers, so several of these can be live across the room at once while
+// any given box shows whatever its owner happened to roll.
 export function EffectLayer({
   effects,
   children,
@@ -17,8 +20,13 @@ export function EffectLayer({
 }) {
   const blur = effects.has("squint");
   const flip = effects.has("flip");
+  const lights = effects.has("lights");
   return (
-    <div className={`relative overflow-hidden ${className ?? "h-full w-full"}`}>
+    <div
+      className={`relative overflow-hidden ${lights ? "effect-shake" : ""} ${
+        className ?? "h-full w-full"
+      }`}
+    >
       <div
         className={`h-full w-full transition-all duration-200 ${
           blur ? "blur-md" : ""

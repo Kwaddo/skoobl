@@ -335,6 +335,9 @@ func (r *Room) endGame() {
 	r.phaseGen++
 	r.state.Phase = PhaseEnded
 	r.state.PhaseEndsAt = 0
+	// Freeze the champion now, while the full roster is still present, so the
+	// results banner keeps naming them even as players (including the winner) leave.
+	r.state.Winner, r.state.WinnerScore = r.topScorer()
 	// Drop transient round data so the final scoreboard view carries no leftovers.
 	r.state.Prompt = ""
 	r.state.Drawings = nil
@@ -347,6 +350,19 @@ func (r *Room) endGame() {
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
 	r.state.Effects = nil
+}
+
+// topScorer returns the highest-scoring player's name and score, breaking ties by
+// roster order (the first to reach that score). Returns ("", 0) for an empty room.
+func (r *Room) topScorer() (string, int) {
+	best := ""
+	bestScore := 0
+	for _, p := range r.state.Players {
+		if best == "" || p.Score > bestScore {
+			best, bestScore = p.Name, p.Score
+		}
+	}
+	return best, bestScore
 }
 
 // returnToLobby sends a finished game back to the lobby for a fresh round,
@@ -369,6 +385,8 @@ func (r *Room) returnToLobby() {
 	r.state.FeatureCount = 0
 	r.state.FeaturedPast = nil
 	r.state.Effects = nil
+	r.state.Winner = ""
+	r.state.WinnerScore = 0
 	for i := range r.state.Players {
 		r.state.Players[i].Score = 0
 	}

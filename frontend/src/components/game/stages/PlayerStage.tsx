@@ -7,13 +7,14 @@ import type { Stroke } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 import { DrawingCanvas } from "../canvas/DrawingCanvas";
 import { StrokesView } from "../canvas/StrokesView";
+import { EffectFlash } from "../display/EffectFlash";
 import { EffectLayer } from "../display/EffectLayer";
 import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
 import { FlippedGuessing } from "../display/FlippedGuessing";
 import { PlayerGrid } from "../display/PlayerList";
 import { Timer } from "../display/Timer";
-import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "../icons";
+import { ArrowUp, Avatar, Brush, Check, Cross, Lock, Scribble } from "../icons";
 
 // PlayerStage is the phone controller. It owns the canvas (drawing) and the
 // pick list (guessing); it never renders the drawing — players look at the host
@@ -27,21 +28,36 @@ export function PlayerStage({
 }) {
   const phase = useGameStore((s) => s.phase);
   const round = useGameStore((s) => s.round);
+  const mode = useGameStore((s) => s.mode);
+  // Read here (not just in the sub-stages) so the strike-flash overlay persists
+  // across the drawing→guessing switch and can shout the moment any hit lands.
+  const effects = useActiveEffects();
 
+  let inner: React.ReactNode = null;
   switch (phase) {
     case "lobby":
-      return <PlayerLobby />;
+      inner = <PlayerLobby />;
+      break;
     case "drawing":
-      return <PlayerDrawing key={round} actions={actions} />;
+      inner = <PlayerDrawing key={round} actions={actions} />;
+      break;
     case "guessing":
-      return <PlayerGuessing key={round} name={name} actions={actions} />;
+      inner = <PlayerGuessing key={round} name={name} actions={actions} />;
+      break;
     case "reveal":
-      return <PlayerReveal name={name} />;
+      inner = <PlayerReveal name={name} />;
+      break;
     case "ended":
-      return <EndedStage name={name} screen="player" />;
-    default:
-      return null;
+      inner = <EndedStage name={name} screen="player" />;
+      break;
   }
+
+  return (
+    <>
+      {inner}
+      {mode === "frenzy" && <EffectFlash effects={effects} />}
+    </>
+  );
 }
 
 function PlayerLobby() {
@@ -111,7 +127,10 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
   const drawn = players.filter((p) => p.locked).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    // select-none across the whole drawing stage: while dragging the pen near the
+    // prompt/labels it's easy to accidentally start selecting text, which is
+    // annoying mid-doodle. Nothing here is meant to be copied.
+    <div className="flex h-full min-h-0 flex-col gap-3 select-none">
       <div className="flex shrink-0 items-center justify-between gap-3">
         <div className="flex flex-col items-start gap-1">
           <span
@@ -228,7 +247,7 @@ export function PlayerGuessing({
 
   return (
     <div
-      className={`m-auto flex w-full max-h-full min-h-0 flex-col gap-4 ${
+      className={`m-auto flex w-full max-h-full min-h-0 flex-col gap-4 short:my-0 short:h-full lg:my-0 lg:h-full ${
         showDrawing ? "lg:max-w-6xl" : "lg:max-w-3xl"
       }`}
     >
@@ -257,9 +276,9 @@ export function PlayerGuessing({
           <EffectLayer
             key={`drawing-${featureIndex}`}
             effects={effects}
-            className="tape reveal-clip mt-2 aspect-4/3 max-h-[38vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] short:mt-0 short:aspect-auto short:h-full short:w-3/5 short:shrink-0 lg:mt-0 lg:aspect-auto lg:h-full lg:w-3/5 lg:shrink-0"
+            className="tape reveal-clip mt-2 aspect-4/3 max-h-[38vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] short:mt-0 short:h-full short:max-h-none short:w-auto short:max-w-3/5 short:shrink-0 lg:mt-0 lg:h-full lg:max-h-none lg:w-auto lg:max-w-3/5 lg:shrink-0"
           >
-            <StrokesView strokes={drawing} className="h-full w-full" />
+            <StrokesView strokes={drawing} className="h-full w-full object-contain" />
           </EffectLayer>
         )}
 
@@ -293,7 +312,7 @@ export function PlayerGuessing({
             <ul
               className={`grid h-full grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:auto-rows-min lg:content-start ${
                 showDrawing
-                  ? "short:grid-cols-1 lg:grid-cols-2"
+                  ? "short:auto-rows-min short:grid-cols-1 short:content-start lg:grid-cols-2"
                   : "lg:grid-cols-4"
               }`}
             >
@@ -306,18 +325,28 @@ export function PlayerGuessing({
                     style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
                   >
                     {hideNames ? (
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-foreground/10 font-display text-lg font-black text-muted">
-                        ?
-                      </span>
+                      // Frenzy "scribble out the names": the avatar redacts to a
+                      // solid black tile and the name becomes the player's seeded
+                      // scribble (same scrawl the host gallery uses), wiping on
+                      // left-to-right — so you must place the artist from the
+                      // drawing alone, not by reading the roster.
+                      <span
+                        aria-hidden
+                        className="h-9 w-9 shrink-0 rounded-lg border border-foreground/25 bg-black"
+                      />
                     ) : (
                       <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
                     )}
-                    <span
-                      dir="auto"
-                      className={`truncate font-semibold ${hideNames ? "select-none blur-sm" : ""}`}
-                    >
-                      {hideNames ? "???" : p.name}
-                    </span>
+                    {hideNames ? (
+                      <Scribble
+                        seed={p.name}
+                        className="scribble-wipe h-5 w-full max-w-32 min-w-0 select-none text-foreground"
+                      />
+                    ) : (
+                      <span dir="auto" className="truncate font-semibold">
+                        {p.name}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}

@@ -388,13 +388,13 @@ describe("stage split", () => {
       youAreArtist: false,
       yourEffects: [{ kind: "hidenames", endsAt: Date.now() + 5000 }],
     });
-    const { getAllByText, queryByText } = render(
+    const { container, queryByText } = render(
       <PlayerStage name="ann" actions={noopActions} />,
     );
-    // Both candidate names are hidden behind a placeholder, not readable.
+    // Both candidate names are scribbled out (not readable), one scrawl each.
     expect(queryByText("bob")).toBeNull();
     expect(queryByText("carol")).toBeNull();
-    expect(getAllByText("???").length).toBe(2);
+    expect(container.querySelectorAll(".scribble-wipe").length).toBe(2);
   });
 
   it("frenzy squint blurs the guess options in TV-host mode (no drawing on the phone)", () => {

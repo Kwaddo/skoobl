@@ -64,6 +64,23 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// jsdom doesn't implement matchMedia — stub a no-op "never matches" media query
+// so components that adapt to viewport (e.g. the drawing toolbar's short/wide
+// breakpoint) render their default layout in tests instead of crashing.
+if (typeof globalThis.matchMedia !== "function") {
+  globalThis.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList;
+}
+
 const g = globalThis as typeof globalThis & { jsdom?: { window?: Window } };
 if (g.jsdom?.window) {
   const jsdWindow = g.jsdom.window;

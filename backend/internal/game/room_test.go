@@ -1308,6 +1308,53 @@ func draft(r *Room, name string) {
 	}})
 }
 
+func TestWinnerFrozenAtGameEndSurvivesLeave(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	// Make bob the clear champion.
+	for i := range r.state.Players {
+		if r.state.Players[i].Name == "bob" {
+			r.state.Players[i].Score = 50
+		} else {
+			r.state.Players[i].Score = 10
+		}
+	}
+
+	r.endGame()
+	if r.state.Phase != PhaseEnded {
+		t.Fatalf("phase = %q, want ended", r.state.Phase)
+	}
+	if r.state.Winner != "bob" || r.state.WinnerScore != 50 {
+		t.Fatalf("frozen winner = (%q,%d), want (bob,50)", r.state.Winner, r.state.WinnerScore)
+	}
+
+	// The winner leaves the results screen: the frozen winner must NOT shift to the
+	// next-highest remaining player.
+	r.handle(Command{Kind: CmdLeave, Player: "bob", Unsub: make(chan GameState, 1)})
+	if _, gone := r.present["bob"]; gone {
+		t.Fatal("bob should have left")
+	}
+	if r.state.Winner != "bob" || r.state.WinnerScore != 50 {
+		t.Fatalf("after winner left, winner = (%q,%d), want (bob,50) still frozen", r.state.Winner, r.state.WinnerScore)
+	}
+	// And the remaining players' views still carry the frozen champion.
+	if av := r.state.viewFor("alice", r.present); av.Winner != "bob" || av.WinnerScore != 50 {
+		t.Fatalf("view winner = (%q,%d), want (bob,50)", av.Winner, av.WinnerScore)
+	}
+}
+
+func TestReturnToLobbyClearsWinner(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Players[0].Score = 30
+	r.endGame()
+	if r.state.Winner == "" {
+		t.Fatal("winner should be set at game end")
+	}
+	r.handle(Command{Kind: CmdReturnToLobby, Player: "tv"})
+	if r.state.Winner != "" || r.state.WinnerScore != 0 {
+		t.Fatalf("return-to-lobby must clear the winner: (%q,%d)", r.state.Winner, r.state.WinnerScore)
+	}
+}
+
 func TestDraftStoresWithoutAdvancing(t *testing.T) {
 	r := syncRoom(t, "alice", "bob", "carol", "dave")
 	for _, n := range []string{"alice", "bob", "carol", "dave"} {

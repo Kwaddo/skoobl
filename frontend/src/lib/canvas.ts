@@ -165,7 +165,10 @@ export function drawStrokes(
 ): void {
   ctx.fillStyle = CANVAS_BG;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  for (const s of strokes) {
+  // Tolerate a null/garbled list or stroke (a blank lock-in can serialize a
+  // gallery entry as JSON null) — just paint the blank background instead.
+  for (const s of strokes ?? []) {
+    if (!s?.points) continue;
     if (s.fill) {
       const seed = s.points[0];
       if (!seed) continue;
