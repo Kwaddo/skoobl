@@ -455,6 +455,26 @@ canvas {
     display: none;
   }
 
+  /* compact key: same stamp, scaled for toolbars / inline action bars where the
+     hero-sized shadow would overpower neighbouring controls. The consumer sets
+     the height (e.g. h-11) so it lands on the bar's shared baseline instead of
+     growing from text + padding. */
+  .btn-key--sm {
+    border-radius: 0.6rem;
+    box-shadow:
+      3px 4px 0 0 var(--shadow-color),
+      0 8px 16px -12px rgba(0, 0, 0, 0.55);
+  }
+  .btn-key--sm:active {
+    transform: translate(3px, 4px);
+    box-shadow:
+      0 0 0 0 var(--shadow-color),
+      0 4px 10px -8px rgba(0, 0, 0, 0.8);
+  }
+  .btn-key--sm:disabled {
+    box-shadow: 3px 4px 0 0 var(--ink-edge);
+  }
+
   /* secondary stamp: the same key-cap shape, shadow and press as .btn-key, but a
      surface (paper / chalk-panel) face with an ink outline instead of a solid ink
      fill — pairs with .btn-key as a "same style, different colour" choice. */

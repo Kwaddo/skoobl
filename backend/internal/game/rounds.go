@@ -390,6 +390,6 @@ func (r *Room) startPhase(p Phase, durMs int) {
 		r.state.PhaseEndsAt = 0
 	}
 	if r.state.Mode == ModeFrenzy && (p == PhaseDrawing || p == PhaseGuessing) {
-		r.armWave(r.phaseGen, firstEffectDelay)
+		r.armWave(r.phaseGen, firstWaveDelay(durMs))
 	}
 }

@@ -152,7 +152,7 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
             footer={
               <button
                 type="button"
-                className="btn-key w-full whitespace-nowrap px-6 py-4 text-lg sm:w-auto sm:px-8"
+                className="btn-key btn-key--sm h-11 w-full whitespace-nowrap px-5 text-base sm:w-auto sm:px-6"
                 onClick={submit}
               >
                 Lock in →

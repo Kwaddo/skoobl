@@ -331,41 +331,44 @@ export function DrawingCanvas({
   };
 
   return (
-    // One column at every size: the canvas fills the available height and a single
-    // bottom bar (tools + Lock-in) sits beneath it. The canvas is a fixed-aspect
-    // (4:3) box that fits its slot both ways — width-driven in portrait, height-
-    // driven in landscape — so it never overflows the bar. The bar is shrink-0, so
-    // it's pinned: the canvas (flex-1) is what gives up space when the screen is
-    // cramped, never the Lock-in button.
+    // One centered column at every size. The canvas is a direct flex child so its
+    // fixed-aspect (4:3) box keeps measuring against the real available height
+    // (after the header) — width-driven in portrait, height-driven in landscape,
+    // never overflowing a short screen. Two equal flex-1 spacers above and below
+    // center the canvas + bar cluster: when the canvas is shorter than the space
+    // (width-limited), the slack splits evenly top and bottom; when it fills the
+    // height (landscape), the spacers collapse to zero. The bar hugs right under
+    // the canvas.
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <EffectLayer
-          effects={effects}
-          className="mx-auto aspect-4/3 w-full max-h-full rounded-2xl landscape:h-full landscape:w-auto landscape:max-w-full"
-        >
-          <canvas
-            ref={ref}
-            width={CANVAS_W}
-            height={CANVAS_H}
-            onPointerDown={start}
-            onPointerMove={move}
-            onPointerUp={end}
-            onPointerLeave={end}
-            onPointerCancel={end}
-            className={`h-full w-full touch-none select-none rounded-2xl border-2 border-border bg-surface ${
-              inputDisabled ? "opacity-70" : "cursor-crosshair"
-            }`}
-          />
-        </EffectLayer>
-      </div>
+      <div className="min-h-0 flex-1" aria-hidden />
+      <EffectLayer
+        effects={effects}
+        className="mx-auto min-h-0 aspect-4/3 w-full max-h-full rounded-2xl landscape:h-full landscape:w-auto landscape:max-w-full"
+      >
+        <canvas
+          ref={ref}
+          width={CANVAS_W}
+          height={CANVAS_H}
+          onPointerDown={start}
+          onPointerMove={move}
+          onPointerUp={end}
+          onPointerLeave={end}
+          onPointerCancel={end}
+          className={`h-full w-full touch-none select-none rounded-2xl border-2 border-border bg-surface ${
+            inputDisabled ? "opacity-70" : "cursor-crosshair"
+          }`}
+        />
+      </EffectLayer>
 
       {!disabled && (
-        <div className="flex shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
+        <div className="mx-auto flex w-fit max-w-full shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
           {/* One bottom action bar at every size: the tool cluster and the Lock-in
               sit together, centered — tools then button, close, not flung to
-              opposite edges. Stacked full-width on a narrow phone. The bar is
-              shrink-0 so it stays pinned while the canvas above flexes; Lock-in is
-              never pushed below the fold. Every control is a fixed 36px square. */}
+              opposite edges. The bar is w-fit (shrink-wrapped to its widest child,
+              the tool row) and centered; stacked, items-stretch makes Lock-in span
+              that same width, so it's never wider than the toolbar nor a tiny pill.
+              shrink-0 keeps it pinned while the canvas above flexes; Lock-in is
+              never pushed below the fold. Every control is a fixed 40px square. */}
           <div className="flex flex-wrap items-center justify-center gap-2">
             {/* Color — a swatch that opens a popover of presets plus a custom
                 picker, so common colors are one tap but anything is reachable. */}
@@ -378,7 +381,7 @@ export function DrawingCanvas({
                   setSizeOpen(false);
                   setPaletteOpen((o) => !o);
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-border transition-colors hover:border-muted"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border-2 border-border transition-colors hover:border-muted"
               >
                 <span
                   className="h-5 w-5 rounded-md border border-black/20"
@@ -523,11 +526,12 @@ export function DrawingCanvas({
           {footer && <div className="sm:shrink-0">{footer}</div>}
         </div>
       )}
+      <div className="min-h-0 flex-1" aria-hidden />
     </div>
   );
 }
 
-// ToolButton is one 36px-square control in the drawing toolbar — a toggle (pen /
+// ToolButton is one 40px-square control in the drawing toolbar — a toggle (pen /
 // fill / brush size) or an action (undo / clear). Active toggles get a primary
 // ring; disabled actions dim. Keeping every control the same square size lets the
 // toolbar wrap cleanly at any width without anything getting clipped.
@@ -553,7 +557,7 @@ function ToolButton({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 transition-colors disabled:opacity-40 ${
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-2 transition-colors disabled:opacity-40 ${
         active
           ? "border-primary bg-surface-2 text-foreground"
           : "border-border text-muted hover:border-muted hover:text-foreground"
