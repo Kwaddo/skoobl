@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import { syncClock } from "./clock";
 import type {
+  ActiveEffect,
+  GameMode,
   GameState,
   Language,
   Phase,
   Player,
+  PoolDrawing,
   Reveal,
   Stroke,
 } from "./protocol";
@@ -22,6 +25,35 @@ let noticeSeq = 0;
 const inGamePhase = (p: Phase) =>
   p === "drawing" || p === "guessing" || p === "reveal";
 
+// foldGallery accumulates the game's drawings into per-round history keyed by
+// artist. The host receives the whole round's gallery at once (s.gallery); EVERY
+// client also folds in each drawing as it's revealed, so by game end all players
+// — not just the host — have everyone's revealed art to browse in the History
+// tab. Reset to empty back in the lobby. Only revealed art is ever folded in, so
+// nothing leaks before its reveal.
+function foldGallery(
+  prev: Record<number, Record<string, Stroke[]>>,
+  s: GameState,
+): Record<number, Record<string, Stroke[]>> {
+  if (s.phase === "lobby") return {};
+  const round = s.round ?? 0;
+  if (!round) return prev;
+  let next = prev;
+  const merge = (artist: string, strokes: Stroke[]) => {
+    next = { ...next, [round]: { ...(next[round] ?? {}), [artist]: strokes } };
+  };
+  if (s.gallery && Object.keys(s.gallery).length > 0) {
+    for (const [artist, strokes] of Object.entries(s.gallery)) {
+      merge(artist, strokes);
+    }
+  }
+  const revealed = s.currentDrawing;
+  if (s.phase === "reveal" && s.reveal?.artist && revealed && revealed.length > 0) {
+    merge(s.reveal.artist, revealed);
+  }
+  return next;
+}
+
 // The store mirrors the latest server view of the room. Every "state" broadcast
 // replaces it wholesale via applyState; components select the slices they need.
 interface GameStore {
@@ -29,6 +61,7 @@ interface GameStore {
   phase: Phase;
   host: string;
   hostPlays: boolean;
+  mode: GameMode;
   players: Player[];
   round: number;
   totalRounds: number;
@@ -38,6 +71,10 @@ interface GameStore {
   drawMs: number;
   guessMs: number;
   phaseEndsAt: number;
+  // Frozen at game end on the server (see backend endGame), so the results banner
+  // keeps naming the real champion even after they leave the results screen.
+  winner: string;
+  winnerScore: number;
   yourPrompt: string;
   currentDrawing: Stroke[];
   gallery: Record<string, Stroke[]>;
@@ -51,8 +88,13 @@ interface GameStore {
   youAreArtist: boolean;
   yourGuess: string;
   reveal: Reveal | null;
+  target: string;
+  youAreTarget: boolean;
+  pool: PoolDrawing[];
+  revealed: string[];
   roundFeatured: string[];
   closed: boolean;
+  yourEffects: ActiveEffect[];
   notices: Notice[];
   self: string;
   error: string | null;
@@ -63,6 +105,7 @@ interface GameStore {
   setSelf: (name: string) => void;
   applyState: (s: GameState) => void;
   recordDrawing: (round: number, strokes: Stroke[]) => void;
+  pushNotice: (text: string) => void;
   dismissNotice: (id: number) => void;
   setError: (msg: string | null) => void;
   setConnected: (v: boolean) => void;
@@ -74,6 +117,7 @@ const initial = {
   phase: "lobby" as Phase,
   host: "",
   hostPlays: false,
+  mode: "classic" as GameMode,
   players: [] as Player[],
   round: 0,
   totalRounds: 3,
@@ -83,6 +127,8 @@ const initial = {
   drawMs: 80_000,
   guessMs: 25_000,
   phaseEndsAt: 0,
+  winner: "",
+  winnerScore: 0,
   yourPrompt: "",
   currentDrawing: [] as Stroke[],
   gallery: {} as Record<string, Stroke[]>,
@@ -91,8 +137,13 @@ const initial = {
   youAreArtist: false,
   yourGuess: "",
   reveal: null as Reveal | null,
+  target: "",
+  youAreTarget: false,
+  pool: [] as PoolDrawing[],
+  revealed: [] as string[],
   roundFeatured: [] as string[],
   closed: false,
+  yourEffects: [] as ActiveEffect[],
   notices: [] as Notice[],
   self: "",
   error: null as string | null,
@@ -137,6 +188,7 @@ export const useGameStore = create<GameStore>((set) => ({
         phase: s.phase,
         host: s.host,
         hostPlays: s.hostPlays ?? false,
+        mode: s.mode ?? "classic",
         players: s.players ?? [],
         round: s.round ?? 0,
         totalRounds: s.totalRounds ?? initial.totalRounds,
@@ -146,27 +198,31 @@ export const useGameStore = create<GameStore>((set) => ({
         drawMs: s.drawMs ?? initial.drawMs,
         guessMs: s.guessMs ?? initial.guessMs,
         phaseEndsAt: s.phaseEndsAt ?? 0,
+        winner: s.winner ?? "",
+        winnerScore: s.winnerScore ?? 0,
         yourPrompt: s.yourPrompt ?? "",
         currentDrawing: s.currentDrawing ?? [],
         gallery: s.gallery ?? {},
         // Wipe the player's own gallery when a new game starts (back in lobby).
         myDrawings: s.phase === "lobby" ? {} : prev.myDrawings,
-        // Host-only: fold each reveal's gallery into the per-round history;
-        // wiped back in the lobby like the rest of a game's drawing data.
-        galleryHistory:
-          s.phase === "lobby"
-            ? {}
-            : s.gallery && Object.keys(s.gallery).length > 0 && s.round
-              ? { ...prev.galleryHistory, [s.round]: s.gallery }
-              : prev.galleryHistory,
+        // Fold each round's drawings into per-round history (host gets the whole
+        // gallery; everyone accumulates revealed art) for the History tab.
+        galleryHistory: foldGallery(prev.galleryHistory, s),
         youAreArtist: s.youAreArtist ?? false,
         yourGuess: s.yourGuess ?? "",
         reveal: s.reveal ?? null,
+        target: s.target ?? "",
+        youAreTarget: s.youAreTarget ?? false,
+        pool: s.pool ?? [],
+        revealed: s.revealed ?? [],
         roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,
+        yourEffects: s.yourEffects ?? [],
         notices,
       };
     }),
+  pushNotice: (text) =>
+    set((s) => ({ notices: [...s.notices, { id: ++noticeSeq, text }] })),
   dismissNotice: (id) =>
     set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   setError: (msg) => set({ error: msg }),

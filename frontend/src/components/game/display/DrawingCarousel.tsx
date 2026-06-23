@@ -27,7 +27,9 @@ export function DrawingCarousel({
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      <div className={`relative min-h-0 flex-1 ${HOST_CANVAS_BOX}`}>
+      <div
+        className={`relative aspect-[4/3] lg:aspect-auto lg:min-h-0 lg:flex-1 ${HOST_CANVAS_BOX}`}
+      >
         <StrokesView strokes={cur.strokes} className={HOST_CANVAS} />
         {n > 1 && (
           <>

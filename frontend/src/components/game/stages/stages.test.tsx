@@ -12,8 +12,10 @@ const noopActions = {
   returnToLobby: () => {},
   leave: () => {},
   submitDrawing: () => {},
-  draftDrawing: () => {},
+  draftAppend: () => {},
+  draftReplace: () => {},
   submitGuess: () => {},
+  submitDoodleGuess: () => {},
 } as unknown as GameActions;
 
 describe("stage split", () => {
@@ -230,6 +232,59 @@ describe("stage split", () => {
     expect(getAllByText("bob").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("flipped guessing shows a doodle grid for the target, not name buttons", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "flipped",
+      target: "bob",
+      youAreTarget: false,
+      players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
+      pool: [
+        {
+          id: "d1",
+          strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+        },
+        {
+          id: "d2",
+          strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
+        },
+      ],
+    });
+    const { container, getByText, queryByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // Two candidate doodles rendered as canvases (the grid).
+    expect(container.querySelectorAll("canvas").length).toBe(2);
+    // Header names the target.
+    expect(getByText(/bob/i)).toBeTruthy();
+    // Not the classic "who drew it?" name list.
+    expect(queryByText(/who drew it/i)).toBeNull();
+  });
+
+  it("host flipped guessing shows the doodle grid and names the target", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "flipped",
+      target: "bob",
+      players: [{ name: "ann" }, { name: "bob" }],
+      pool: [
+        {
+          id: "d1",
+          strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+        },
+        {
+          id: "d2",
+          strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
+        },
+      ],
+    });
+    const { container, getByText } = render(
+      <HostStage name="tv" actions={noopActions} />,
+    );
+    expect(container.querySelectorAll("canvas").length).toBe(2);
+    expect(getByText(/bob/i)).toBeTruthy();
+  });
+
   it("player ended shows their drawings with downloads, not the scoreboard", () => {
     useGameStore.setState({
       phase: "ended",
@@ -252,5 +307,121 @@ describe("stage split", () => {
     expect(queryByText(/play again/i)).toBeNull();
     // "bob" only appears if the Scoreboard rendered — it must not.
     expect(queryByText("bob")).toBeNull();
+  });
+
+  it("frenzy fog overlays the drawing canvas; cramp disables input", () => {
+    useGameStore.setState({
+      phase: "drawing",
+      mode: "frenzy",
+      players: [{ name: "ann" }],
+      yourPrompt: "cat",
+      yourEffects: [
+        { kind: "fog", endsAt: Date.now() + 5000 },
+        { kind: "cramp", endsAt: Date.now() + 5000 },
+      ],
+    });
+    const { container } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // Fog overlay is present over the canvas area.
+    expect(container.querySelector('[data-effect="fog"]')).not.toBeNull();
+    // Cramp disables the canvas (the dim/opacity class the disabled canvas uses).
+    expect(container.querySelector("canvas.opacity-70")).not.toBeNull();
+  });
+
+  it("frenzy lights-out fully blacks out the canvas and eats input", () => {
+    useGameStore.setState({
+      phase: "drawing",
+      mode: "frenzy",
+      players: [{ name: "ann" }],
+      yourPrompt: "cat",
+      yourEffects: [{ kind: "lights", endsAt: Date.now() + 5000 }],
+    });
+    const { container } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    const overlay = container.querySelector('[data-effect="lights"]');
+    expect(overlay).not.toBeNull();
+    // Opaque blackout (not the old translucent bg-black/85) and input-eating
+    // (no pointer-events-none) — the victim can't see or draw.
+    expect(overlay?.className).toContain("bg-black");
+    expect(overlay?.className).not.toContain("pointer-events-none");
+  });
+
+  it("frenzy curtain covers the flipped doodle grid", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "frenzy",
+      // flipped layout drives the on-device grid; frenzy effects layer over it
+      target: "bob",
+      youAreTarget: false,
+      players: [{ name: "ann" }, { name: "bob", hasDrawn: true }],
+      pool: [
+        {
+          id: "d1",
+          strokes: [{ color: "#fff", width: 4, points: [{ x: 1, y: 1 }] }],
+        },
+        {
+          id: "d2",
+          strokes: [{ color: "#f00", width: 4, points: [{ x: 2, y: 2 }] }],
+        },
+      ],
+      yourEffects: [{ kind: "curtain", endsAt: Date.now() + 5000 }],
+    });
+    const { container } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    expect(container.querySelector('[data-effect="curtain"]')).not.toBeNull();
+  });
+
+  it("frenzy hidenames masks the guess option names", () => {
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "frenzy",
+      players: [
+        { name: "ann" },
+        { name: "bob", hasDrawn: true },
+        { name: "carol", hasDrawn: true },
+      ],
+      revealed: [],
+      pool: [],
+      youAreArtist: false,
+      yourEffects: [{ kind: "hidenames", endsAt: Date.now() + 5000 }],
+    });
+    const { container, queryByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // Both candidate names are scribbled out (not readable), one scrawl each.
+    expect(queryByText("bob")).toBeNull();
+    expect(queryByText("carol")).toBeNull();
+    expect(container.querySelectorAll(".scribble-wipe").length).toBe(2);
+  });
+
+  it("frenzy squint blurs the guess options in TV-host mode (no drawing on the phone)", () => {
+    // hostPlays defaults to false (TV mode): the drawing is on the shared screen,
+    // so the option list is the only thing on the player's device. Squint must
+    // still impede it — otherwise it would be a no-op in the standard mode.
+    useGameStore.setState({
+      phase: "guessing",
+      mode: "frenzy",
+      hostPlays: false,
+      players: [
+        { name: "ann" },
+        { name: "bob", hasDrawn: true },
+        { name: "carol", hasDrawn: true },
+      ],
+      revealed: [],
+      pool: [],
+      youAreArtist: false,
+      yourEffects: [{ kind: "squint", endsAt: Date.now() + 5000 }],
+    });
+    const { container, getByText } = render(
+      <PlayerStage name="ann" actions={noopActions} />,
+    );
+    // No drawing is shown on the phone in TV mode…
+    expect(container.querySelector("canvas")).toBeNull();
+    // …but the option list is blurred by the EffectLayer.
+    expect(container.querySelector(".blur-md")).not.toBeNull();
+    expect(getByText("bob")).toBeTruthy();
   });
 });

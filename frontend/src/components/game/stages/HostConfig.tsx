@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { Segmented } from "@/components/Segmented";
 import type { GameActions } from "@/hooks/use-game-socket";
+import { getSaveGalleryPref, setSaveGalleryPref } from "@/lib/history";
+import type { GameMode } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 
 const DRAW_TIME_OPTIONS = [30, 60, 80, 120];
@@ -35,8 +37,14 @@ export function HostConfig({ actions }: { actions: GameActions }) {
   const [guessSec, setGuessSec] = useState(() =>
     Math.round(useGameStore.getState().guessMs / 1000),
   );
+  const [gameMode, setGameMode] = useState<GameMode>(
+    () => useGameStore.getState().mode,
+  );
   const [mode, setMode] = useState<CategoryMode>("random");
   const [categories, setCategories] = useState("");
+  // Device-local pref (not a game setting): also archive every player's drawing
+  // to THIS device's history. Persisted to localStorage, never sent to the server.
+  const [saveGallery, setSaveGallery] = useState(getSaveGalleryPref);
 
   const sync = useCallback(
     (
@@ -45,6 +53,7 @@ export function HostConfig({ actions }: { actions: GameActions }) {
         language: typeof language;
         drawSec: number;
         guessSec: number;
+        gameMode: GameMode;
         mode: CategoryMode;
         categories: string;
       }>,
@@ -54,6 +63,7 @@ export function HostConfig({ actions }: { actions: GameActions }) {
         language,
         drawSec,
         guessSec,
+        gameMode,
         mode,
         categories,
         ...over,
@@ -63,11 +73,12 @@ export function HostConfig({ actions }: { actions: GameActions }) {
         language: next.language,
         drawMs: next.drawSec * 1000,
         guessMs: next.guessSec * 1000,
+        mode: next.gameMode,
         categories:
           next.mode === "custom" ? parseCategories(next.categories) : [],
       });
     },
-    [actions, rounds, language, drawSec, guessSec, mode, categories],
+    [actions, rounds, language, drawSec, guessSec, gameMode, mode, categories],
   );
 
   return (
@@ -75,6 +86,23 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <h3 className="ink-underline w-fit shrink-0 font-display text-lg font-black">
         Game settings
       </h3>
+
+      <Row label="Mode">
+        <Segmented
+          value={gameMode}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
+          options={[
+            { value: "classic" as const, label: "Classic" },
+            { value: "flipped" as const, label: "Whose Doodle" },
+            { value: "frenzy" as const, label: "Frenzy" },
+          ]}
+          onChange={(v) => {
+            setGameMode(v);
+            sync({ gameMode: v });
+          }}
+        />
+      </Row>
 
       <Row label="Rounds">
         <Stepper
@@ -91,6 +119,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Category language">
         <Segmented
           value={language}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={[
             { value: "en" as const, label: "English" },
             { value: "ar" as const, label: "العربية" },
@@ -105,6 +135,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Draw time">
         <Segmented
           value={drawSec}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={DRAW_TIME_OPTIONS.map((s) => ({ value: s, label: `${s}s` }))}
           onChange={(v) => {
             setDrawSec(v);
@@ -116,6 +148,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Guess time">
         <Segmented
           value={guessSec}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={GUESS_TIME_OPTIONS.map((s) => ({
             value: s,
             label: `${s}s`,
@@ -130,6 +164,8 @@ export function HostConfig({ actions }: { actions: GameActions }) {
       <Row label="Categories">
         <Segmented
           value={mode}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
           options={[
             { value: "random" as const, label: "Random" },
             { value: "custom" as const, label: "Custom" },
@@ -137,6 +173,23 @@ export function HostConfig({ actions }: { actions: GameActions }) {
           onChange={(v) => {
             setMode(v);
             sync({ mode: v });
+          }}
+        />
+      </Row>
+
+      <Row label="Save everyone's art here">
+        <Segmented
+          value={saveGallery ? "on" : "off"}
+          className="w-full sm:w-auto"
+          itemClassName="flex-1 px-3 py-1.5 text-sm font-semibold"
+          options={[
+            { value: "off" as const, label: "Off" },
+            { value: "on" as const, label: "On" },
+          ]}
+          onChange={(v) => {
+            const on = v === "on";
+            setSaveGallery(on);
+            setSaveGalleryPref(on);
           }}
         />
       </Row>

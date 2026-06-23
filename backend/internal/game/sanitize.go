@@ -104,3 +104,31 @@ func sanitizeColor(c string) string {
 	}
 	return defaultStrokeColor
 }
+
+// appendBoundedStrokes sanitizes `add` and appends it to `cur`, enforcing the
+// stroke-count and total-point caps against the already-accumulated buffer so an
+// incremental draft can never grow past the same bounds sanitizeStrokes enforces
+// on a one-shot drawing.
+func appendBoundedStrokes(cur, add []Stroke) []Stroke {
+	total := 0
+	for _, s := range cur {
+		total += len(s.Points)
+	}
+	out := cur
+	for _, s := range sanitizeStrokes(add) {
+		if len(out) >= maxStrokes || total >= maxPointsTotal {
+			break
+		}
+		pts := s.Points
+		if total+len(pts) > maxPointsTotal {
+			pts = pts[:maxPointsTotal-total]
+		}
+		if len(pts) == 0 {
+			break
+		}
+		s.Points = pts
+		out = append(out, s)
+		total += len(pts)
+	}
+	return out
+}
