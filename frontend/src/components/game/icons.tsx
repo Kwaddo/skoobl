@@ -195,6 +195,23 @@ export const Bucket = ({ className }: IconProps) => (
   </Svg>
 );
 
+// Pipette — the eyedropper: sample a color from anything on the canvas. The
+// glyph fills the viewBox corner-to-corner, so it's scaled down ~0.78 around
+// the centre to match the visual weight of the other tools; the bumped
+// strokeWidth cancels the shrink so the line stays the same thickness.
+export const Pipette = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <g
+      transform="translate(12 12) scale(0.78) translate(-12 -12)"
+      strokeWidth={2.3}
+    >
+      <path d="m2 22 1-1h3l9-9" />
+      <path d="M3 21v-3l9-9" />
+      <path d="m15 6 3.9 3.9a2 2 0 0 0 2.8 0l.8-.8a2 2 0 0 0 0-2.8L19.4 2.4a2 2 0 0 0-2.8 0l-.8.8a2 2 0 0 0 0 2.8Z" />
+    </g>
+  </Svg>
+);
+
 // Undo — a curved arrow looping back.
 export const Undo = ({ className }: IconProps) => (
   <Svg className={className}>

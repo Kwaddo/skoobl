@@ -1,5 +1,6 @@
 import { Navigate, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useDrawingHistory } from "@/hooks/use-drawing-history";
 import { CONNECTION_ERROR, useGameSocket } from "@/hooks/use-game-socket";
 import { setFlash } from "@/lib/flash";
 import { recallHostPlay, recallName } from "@/lib/identity";
@@ -8,9 +9,16 @@ import { ErrorPanel } from "./display/ErrorPanel";
 import { RoomHeader } from "./display/RoomHeader";
 import { ConfirmDialog } from "./overlays/ConfirmDialog";
 import { Toasts } from "./overlays/Toasts";
-import { HostStage } from "./stages/HostStage";
 import { PlayerStage } from "./stages/PlayerStage";
-import { PlayingHostStage } from "./stages/PlayingHostStage";
+
+const HostStage = lazy(() =>
+  import("./stages/HostStage").then((m) => ({ default: m.HostStage })),
+);
+const PlayingHostStage = lazy(() =>
+  import("./stages/PlayingHostStage").then((m) => ({
+    default: m.PlayingHostStage,
+  })),
+);
 
 export type Screen = "host" | "player";
 
@@ -97,21 +105,22 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
     navigate({ to: "/" });
   }, [recoverable, error, screen, code, navigate]);
 
+  // Persist this device's drawings to local history as the game plays.
+  useDrawingHistory(code, name ?? "");
+
   if (!name) return <Navigate to="/" />;
   if (error === CONNECTION_ERROR) return <ErrorPanel message={error} />;
   if (recoverable) return null;
 
-  // The host is a shared "TV": locked to the viewport height and never scrolls,
-  // so nothing jumps around for the players watching. The player is a phone
-  // controller: narrow and free to scroll.
-  //
-  // Both screens lock to the viewport and never scroll the page; each phase
-  // fits/centers/squeezes its own content. Host is a wide shared display, the
-  // player a narrower controller.
-  // Only the display host gets the wide shared-screen shell; a playing host uses
-  // the narrow controller shell like any other player.
+  // The host is a shared "TV". On a large landscape screen (lg+) it locks to the
+  // viewport height and never scrolls, so nothing jumps for the players watching.
+  // On smaller/portrait screens that no-scroll fit can't hold all the content
+  // (e.g. the lobby's settings form), so below lg the shell grows past the
+  // viewport and the page scrolls instead. The player/play-along shell is the
+  // narrow controller: it widens into a two-pane workspace on wide desktops and
+  // keeps the side-by-side canvas room on short/landscape phones.
   const shell = bigScreen
-    ? "mx-auto flex h-dvh w-full max-w-[1700px] flex-col gap-5 overflow-hidden px-6 py-5 sm:px-10"
+    ? "mx-auto flex min-h-dvh w-full max-w-[1700px] flex-col gap-5 px-6 py-5 sm:px-10 lg:h-dvh lg:min-h-0 lg:overflow-hidden"
     : // Narrow controller on phones/portrait tablets. On a wide desktop (lg+) it
       // widens into a real two-pane workspace instead of a thin centred column,
       // and short/landscape still gets the side-by-side canvas room.
@@ -128,13 +137,15 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
       />
       <section className="flex min-h-0 flex-1 flex-col">
         {/* phases below fill, centre, or scroll within this fixed area */}
-        {bigScreen ? (
-          <HostStage name={name} actions={actions} />
-        ) : showPlayingHost ? (
-          <PlayingHostStage name={name} actions={actions} />
-        ) : (
-          <PlayerStage name={name} actions={actions} />
-        )}
+        <Suspense fallback={null}>
+          {bigScreen ? (
+            <HostStage name={name} actions={actions} />
+          ) : showPlayingHost ? (
+            <PlayingHostStage name={name} actions={actions} />
+          ) : (
+            <PlayerStage name={name} actions={actions} />
+          )}
+        </Suspense>
       </section>
 
       <ConfirmDialog

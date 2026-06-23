@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"time"
 )
@@ -15,6 +16,7 @@ func (r *Room) applyConfig(cfg Config) {
 	r.state.DrawMs = clamp(cfg.DrawMs, minDrawMs, maxDrawMs)
 	r.state.GuessMs = clamp(cfg.GuessMs, minGuessMs, maxGuessMs)
 	r.state.Categories = sanitizeCategories(cfg.Categories)
+	r.state.Mode = sanitizeMode(cfg.Mode)
 }
 
 func (r *Room) startGame() {
@@ -22,6 +24,7 @@ func (r *Room) startGame() {
 		r.state.Players[i].Score = 0
 	}
 	r.state.FeaturedPast = nil
+	r.promptDeck = nil // fresh shuffle for the new game
 	r.beginRound(1)
 }
 
@@ -38,6 +41,7 @@ func (r *Room) beginRound(n int) {
 	r.state.RoundFeatured = nil
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
+	r.state.DrawIDs = nil
 	r.state.Prompt = r.pickPrompt()
 	r.startPhase(PhaseDrawing, r.state.DrawMs)
 }
@@ -58,8 +62,10 @@ func guessesForPlayers(players int) int {
 }
 
 // pickPrompt chooses the single word everyone draws this round, from the custom
-// pool if configured, else the built-in pool for the chosen language. It avoids
-// immediately repeating the previous round's word when the pool allows.
+// pool if configured, else the built-in pool for the chosen language. Words are
+// drawn from a shuffled deck (promptDeck) so none repeats until the whole pool is
+// used, then the deck reshuffles. The reshuffle never repeats the previous word
+// back-to-back.
 func (r *Room) pickPrompt() string {
 	pool := r.state.Categories
 	if len(pool) == 0 {
@@ -71,13 +77,27 @@ func (r *Room) pickPrompt() string {
 	case 1:
 		return pool[0]
 	}
-	prev := r.state.Prompt
-	for i := 0; i < 5; i++ {
-		if w := pool[rand.IntN(len(pool))]; w != prev {
-			return w
-		}
+	if len(r.promptDeck) == 0 {
+		r.promptDeck = newPromptDeck(pool, r.state.Prompt)
 	}
-	return pool[rand.IntN(len(pool))]
+	// Draw from the end (cheap slice trim).
+	last := len(r.promptDeck) - 1
+	w := r.promptDeck[last]
+	r.promptDeck = r.promptDeck[:last]
+	return w
+}
+
+// newPromptDeck returns pool shuffled into a fresh deck. Words are drawn from the
+// end, so it ensures the last element (the next pick) isn't `avoid` — the
+// previous round's prompt — keeping a reshuffle from repeating a word back-to-back.
+func newPromptDeck(pool []string, avoid string) []string {
+	deck := make([]string, len(pool))
+	copy(deck, pool)
+	rand.Shuffle(len(deck), func(i, j int) { deck[i], deck[j] = deck[j], deck[i] })
+	if n := len(deck); n > 1 && deck[n-1] == avoid {
+		deck[n-1], deck[0] = deck[0], deck[n-1]
+	}
+	return deck
 }
 
 // advance is the timer-driven transition: drawing → guessing → reveal. Reveal is
@@ -104,7 +124,19 @@ func (r *Room) beginGuessing() {
 		r.beginReveal()
 		return
 	}
-	r.state.FeatureCount = min(guessesForPlayers(len(r.state.Players)), drew)
+	if r.state.Mode == ModeFlipped {
+		r.assignDrawIDs()
+	}
+	// Keep at least two drawers off-screen each round. Once an artist is revealed
+	// they're struck from the remaining drawings' guess options (see PlayerStage),
+	// so featuring nearly every drawer would make the last "who drew it?" a forced
+	// single answer. Leaving a two-drawer margin keeps every guess a real choice.
+	// Floored at one so any round with a drawing still guesses at least once.
+	maxByDrawers := drew - 2
+	if maxByDrawers < 1 {
+		maxByDrawers = 1
+	}
+	r.state.FeatureCount = min(guessesForPlayers(len(r.state.Players)), maxByDrawers)
 	r.state.FeatureIndex = 0
 	r.beginNextFeature()
 }
@@ -152,6 +184,31 @@ func (r *Room) advanceRound() {
 		return
 	}
 	r.endGame()
+}
+
+// assignDrawIDs gives every drawer this round a stable opaque id, used by flipped
+// mode to show drawings without revealing who drew which. Regenerated each round
+// (cleared in beginRound), so the same drawing keeps its id across a round's
+// features but not across rounds.
+func (r *Room) assignDrawIDs() {
+	ids := make(map[string]string, len(r.state.Players))
+	used := map[string]bool{}
+	for _, p := range r.state.Players {
+		if len(r.state.Drawings[p.Name]) == 0 {
+			continue
+		}
+		id := randDrawID()
+		for used[id] {
+			id = randDrawID()
+		}
+		used[id] = true
+		ids[p.Name] = id
+	}
+	r.state.DrawIDs = ids
+}
+
+func randDrawID() string {
+	return fmt.Sprintf("d%08x", rand.Uint32())
 }
 
 // drawerCount returns how many players drew something non-empty this round. An
@@ -278,6 +335,9 @@ func (r *Room) endGame() {
 	r.phaseGen++
 	r.state.Phase = PhaseEnded
 	r.state.PhaseEndsAt = 0
+	// Freeze the champion now, while the full roster is still present, so the
+	// results banner keeps naming them even as players (including the winner) leave.
+	r.state.Winner, r.state.WinnerScore = r.topScorer()
 	// Drop transient round data so the final scoreboard view carries no leftovers.
 	r.state.Prompt = ""
 	r.state.Drawings = nil
@@ -289,6 +349,20 @@ func (r *Room) endGame() {
 	r.state.RoundFeatured = nil
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
+	r.state.Effects = nil
+}
+
+// topScorer returns the highest-scoring player's name and score, breaking ties by
+// roster order (the first to reach that score). Returns ("", 0) for an empty room.
+func (r *Room) topScorer() (string, int) {
+	best := ""
+	bestScore := 0
+	for _, p := range r.state.Players {
+		if best == "" || p.Score > bestScore {
+			best, bestScore = p.Name, p.Score
+		}
+	}
+	return best, bestScore
 }
 
 // returnToLobby sends a finished game back to the lobby for a fresh round,
@@ -310,21 +384,30 @@ func (r *Room) returnToLobby() {
 	r.state.FeatureIndex = 0
 	r.state.FeatureCount = 0
 	r.state.FeaturedPast = nil
+	r.state.Effects = nil
+	r.state.Winner = ""
+	r.state.WinnerScore = 0
 	for i := range r.state.Players {
 		r.state.Players[i].Score = 0
 	}
 }
 
 // startPhase sets the phase, bumps the generation, and arms the advance timer for
-// timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown.
+// timed phases (durMs > 0). PhaseEndsAt lets clients render a countdown. In
+// Frenzy it also clears phase-scoped effects and arms the effect-wave ticker for
+// the drawing/guessing phases.
 func (r *Room) startPhase(p Phase, durMs int) {
 	r.state.Phase = p
 	r.phaseGen++
+	r.state.Effects = nil // effects are phase-scoped — none carry across a transition
 	if durMs > 0 {
 		d := time.Duration(durMs) * time.Millisecond
 		r.state.PhaseEndsAt = time.Now().Add(d).UnixMilli()
 		r.armAdvance(r.phaseGen, d)
 	} else {
 		r.state.PhaseEndsAt = 0
+	}
+	if r.state.Mode == ModeFrenzy && (p == PhaseDrawing || p == PhaseGuessing) {
+		r.armWave(r.phaseGen, firstWaveDelay(durMs))
 	}
 }

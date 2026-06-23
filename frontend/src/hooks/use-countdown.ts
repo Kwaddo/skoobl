@@ -7,15 +7,25 @@ import { now as serverTime } from "@/lib/clock";
 // not the raw device clock, so a host and a player with skewed clocks still show
 // the same time left.
 export function useCountdown(endsAt: number): number | null {
-  const [now, setNow] = useState(() => serverTime());
+  const [remaining, setRemaining] = useState(() =>
+    endsAt ? Math.max(0, Math.ceil((endsAt - serverTime()) / 1000)) : null,
+  );
 
   useEffect(() => {
-    if (!endsAt) return;
-    setNow(serverTime());
-    const id = setInterval(() => setNow(serverTime()), 250);
+    if (!endsAt) {
+      setRemaining(null);
+      return;
+    }
+    // Compute and set immediately on endsAt change
+    const next = Math.max(0, Math.ceil((endsAt - serverTime()) / 1000));
+    setRemaining((prev) => (prev === next ? prev : next));
+
+    const id = setInterval(() => {
+      const next = Math.max(0, Math.ceil((endsAt - serverTime()) / 1000));
+      setRemaining((prev) => (prev === next ? prev : next));
+    }, 250);
     return () => clearInterval(id);
   }, [endsAt]);
 
-  if (!endsAt) return null;
-  return Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return remaining;
 }

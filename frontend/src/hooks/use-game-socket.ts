@@ -88,12 +88,20 @@ export function useGameSocket(
       (strokes: Stroke[]) => emit("submitDrawing", { strokes }),
       [emit],
     ),
-    draftDrawing: useCallback(
-      (strokes: Stroke[]) => emit("draftDrawing", { strokes }),
+    draftAppend: useCallback(
+      (strokes: Stroke[]) => emit("draftAppend", { strokes }),
+      [emit],
+    ),
+    draftReplace: useCallback(
+      (strokes: Stroke[]) => emit("draftReplace", { strokes }),
       [emit],
     ),
     submitGuess: useCallback(
       (artist: string) => emit("submitGuess", { artist }),
+      [emit],
+    ),
+    submitDoodleGuess: useCallback(
+      (id: string) => emit("submitGuess", { id }),
       [emit],
     ),
   };

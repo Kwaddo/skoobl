@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCountdown } from "@/hooks/use-countdown";
+import { useActiveEffects } from "@/hooks/use-effects";
 import type { GameActions } from "@/hooks/use-game-socket";
 import { downloadStrokesPng, pngFilename } from "@/lib/canvas";
 import type { Stroke } from "@/lib/protocol";
 import { useGameStore } from "@/lib/store";
 import { DrawingCanvas } from "../canvas/DrawingCanvas";
 import { StrokesView } from "../canvas/StrokesView";
+import { EffectFlash } from "../display/EffectFlash";
+import { EffectLayer } from "../display/EffectLayer";
 import { EndedStage } from "../display/EndedStage";
 import { FeatureProgress } from "../display/FeatureProgress";
+import { FlippedGuessing } from "../display/FlippedGuessing";
 import { PlayerGrid } from "../display/PlayerList";
 import { Timer } from "../display/Timer";
-import { ArrowUp, Avatar, Brush, Check, Cross, Lock } from "../icons";
+import { ArrowUp, Avatar, Brush, Check, Cross, Lock, Scribble } from "../icons";
 
 // PlayerStage is the phone controller. It owns the canvas (drawing) and the
 // pick list (guessing); it never renders the drawing — players look at the host
@@ -24,21 +28,36 @@ export function PlayerStage({
 }) {
   const phase = useGameStore((s) => s.phase);
   const round = useGameStore((s) => s.round);
+  const mode = useGameStore((s) => s.mode);
+  // Read here (not just in the sub-stages) so the strike-flash overlay persists
+  // across the drawing→guessing switch and can shout the moment any hit lands.
+  const effects = useActiveEffects();
 
+  let inner: React.ReactNode = null;
   switch (phase) {
     case "lobby":
-      return <PlayerLobby />;
+      inner = <PlayerLobby />;
+      break;
     case "drawing":
-      return <PlayerDrawing key={round} actions={actions} />;
+      inner = <PlayerDrawing key={round} actions={actions} />;
+      break;
     case "guessing":
-      return <PlayerGuessing key={round} name={name} actions={actions} />;
+      inner = <PlayerGuessing key={round} name={name} actions={actions} />;
+      break;
     case "reveal":
-      return <PlayerReveal name={name} />;
+      inner = <PlayerReveal name={name} />;
+      break;
     case "ended":
-      return <EndedStage name={name} screen="player" />;
-    default:
-      return null;
+      inner = <EndedStage name={name} screen="player" />;
+      break;
   }
+
+  return (
+    <>
+      {inner}
+      {mode === "frenzy" && <EffectFlash effects={effects} />}
+    </>
+  );
 }
 
 function PlayerLobby() {
@@ -78,6 +97,7 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
   const recordDrawing = useGameStore((s) => s.recordDrawing);
   const connected = useGameStore((s) => s.connected);
   const remaining = useCountdown(endsAt);
+  const effects = useActiveEffects();
   const [submitted, setSubmitted] = useState(false);
   const strokesRef = useRef<Stroke[]>([]);
 
@@ -107,7 +127,10 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
   const drawn = players.filter((p) => p.locked).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    // select-none across the whole drawing stage: while dragging the pen near the
+    // prompt/labels it's easy to accidentally start selecting text, which is
+    // annoying mid-doodle. Nothing here is meant to be copied.
+    <div className="flex h-full min-h-0 flex-col gap-3 select-none">
       <div className="flex shrink-0 items-center justify-between gap-3">
         <div className="flex flex-col items-start gap-1">
           <span
@@ -139,23 +162,19 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <DrawingCanvas
+            effects={effects}
             onChange={(s) => {
               strokesRef.current = s;
             }}
-            onStrokeEnd={(s) => actions.draftDrawing(s)}
+            onDraftAppend={(s) => actions.draftAppend(s)}
+            onDraftReplace={(s) => actions.draftReplace(s)}
             footer={
               <button
                 type="button"
-                className="btn-key w-full whitespace-nowrap px-6 py-4 text-lg short:px-3 short:py-2.5 short:text-sm lg:px-3 lg:py-2.5 lg:text-sm"
+                className="btn-key btn-key--sm h-11 w-full whitespace-nowrap px-5 text-base sm:w-auto sm:px-6"
                 onClick={submit}
               >
-                {/* full label when the button is full-width (stacked); the wide
-                    display font overflows the narrow side column (short/lg), so
-                    use a short label there instead of letting it clip */}
-                <span className="short:hidden lg:hidden">
-                  Lock in my drawing →
-                </span>
-                <span className="hidden short:inline lg:inline">Lock in →</span>
+                Lock in →
               </button>
             }
           />
@@ -183,18 +202,52 @@ export function PlayerGuessing({
   // shown right here on each player's device instead of "look up at the screen".
   const hostPlays = useGameStore((s) => s.hostPlays);
   const drawing = useGameStore((s) => s.currentDrawing);
+  const revealed = useGameStore((s) => s.revealed);
   const remaining = useCountdown(endsAt);
 
+  const target = useGameStore((s) => s.target);
+  const pool = useGameStore((s) => s.pool);
+  const youAreTarget = useGameStore((s) => s.youAreTarget);
+  const me = players.find((p) => p.name === name);
+  const effects = useActiveEffects();
+
+  if (pool.length > 0) {
+    return (
+      <FlippedGuessing
+        target={target}
+        pool={pool}
+        youAreTarget={youAreTarget}
+        alreadyGuessed={me?.hasGuessed ?? false}
+        remaining={remaining}
+        guessMs={guessMs}
+        featureIndex={featureIndex}
+        featureCount={featureCount}
+        onPick={(id) => actions.submitDoodleGuess(id)}
+        effects={effects}
+      />
+    );
+  }
+
   // Only players who actually drew something this round can be the artist, so
-  // they're the only ones worth voting for (non-drawers are excluded).
-  const options = players.filter((p) => p.name !== name && p.hasDrawn);
+  // they're the only ones worth voting for (non-drawers are excluded). Artists
+  // already revealed earlier this round are dropped too — each player draws once,
+  // so a revealed artist can't be behind the drawing on show.
+  const options = players.filter(
+    (p) => p.name !== name && p.hasDrawn && !revealed.includes(p.name),
+  );
+  const shownOptions = effects.has("shuffle")
+    ? [...options].reverse()
+    : options;
+  // hidenames masks each option's name + avatar, so the victim must guess from
+  // the drawing alone with no roster to read off.
+  const hideNames = effects.has("hidenames");
   // Play-along rooms show the drawing inline, so desktop gets a two-pane split
   // (drawing beside the guess list); otherwise it's a single centred column.
   const showDrawing = hostPlays && !youAreArtist;
 
   return (
     <div
-      className={`m-auto flex w-full max-h-full min-h-0 flex-col gap-4 ${
+      className={`m-auto flex w-full max-h-full min-h-0 flex-col gap-4 short:my-0 short:h-full lg:my-0 lg:h-full ${
         showDrawing ? "lg:max-w-6xl" : "lg:max-w-3xl"
       }`}
     >
@@ -214,25 +267,28 @@ export function PlayerGuessing({
         <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
       </div>
 
-      {/* `contents` keeps the mobile stack identical (no extra box); on desktop
-          it becomes the two-pane row holding the drawing and the guess list */}
-      <div className="contents lg:flex lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:gap-6">
+      {/* `contents` keeps the portrait stack identical (no extra box); on a
+          landscape phone (short) and on desktop (lg) it becomes the two-pane row
+          holding the drawing beside the guess list, so a tall drawing can't shove
+          the options off a short screen. */}
+      <div className="contents short:flex short:min-h-0 short:flex-1 short:flex-row short:items-stretch short:gap-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:gap-6">
         {showDrawing && (
-          <div
+          <EffectLayer
             key={`drawing-${featureIndex}`}
-            className="tape reveal-clip mt-2 aspect-4/3 max-h-[42vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] lg:mt-0 lg:aspect-auto lg:h-full lg:w-3/5 lg:shrink-0"
+            effects={effects}
+            className="tape reveal-clip mt-2 aspect-4/3 max-h-[38vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] short:mt-0 short:h-full short:max-h-none short:w-auto short:max-w-3/5 short:shrink-0 lg:mt-0 lg:h-full lg:max-h-none lg:w-auto lg:max-w-3/5 lg:shrink-0"
           >
-            <StrokesView strokes={drawing} className="h-full w-full" />
-          </div>
+            <StrokesView strokes={drawing} className="h-full w-full object-contain" />
+          </EffectLayer>
         )}
 
         {youAreArtist ? (
-          <p className="ink-block tilt-r flex items-center justify-center gap-2 px-5 py-6 text-center font-hand text-2xl leading-tight text-muted lg:flex-1">
+          <p className="ink-block tilt-r flex items-center justify-center gap-2 px-5 py-6 text-center font-hand text-2xl leading-tight text-muted short:flex-1 lg:flex-1">
             <Brush className="h-5 w-5 shrink-0 text-foreground" />
             this one's yours — sit tight while everyone guesses.
           </p>
         ) : yourGuess ? (
-          <p className="ink-block tilt-l px-5 py-6 text-center font-hand text-2xl leading-tight text-muted lg:flex-1 lg:self-center">
+          <p className="ink-block tilt-l px-5 py-6 text-center font-hand text-2xl leading-tight text-muted short:flex-1 short:self-center lg:flex-1 lg:self-center">
             you guessed{" "}
             <span
               dir="auto"
@@ -243,29 +299,59 @@ export function PlayerGuessing({
             — waiting for the reveal…
           </p>
         ) : (
+          // In TV-host mode the drawing is on the shared screen, not here, so the
+          // option list is the only thing on the player's device — wrap it so
+          // Squint (blur) and Curtain (cover) actually impede guessing in every
+          // mode, not just play-along where the drawing is on the phone.
           // keyed by drawing so each new "who drew it?" re-staggers the choices in
-          <ul
+          <EffectLayer
             key={`options-${featureIndex}`}
-            className={`grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:auto-rows-min lg:content-start ${
-              showDrawing ? "lg:grid-cols-2" : "lg:grid-cols-4"
-            }`}
+            effects={effects}
+            className="min-h-0 flex-1"
           >
-            {options.map((p, i) => (
-              <li key={p.name}>
-                <button
-                  type="button"
-                  onClick={() => actions.submitGuess(p.name)}
-                  className="card-arcade card-hover card-press pop flex h-full w-full items-center gap-2 p-3 text-left"
-                  style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
-                >
-                  <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
-                  <span dir="auto" className="truncate font-semibold">
-                    {p.name}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+            <ul
+              className={`grid h-full grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:auto-rows-min lg:content-start ${
+                showDrawing
+                  ? "short:auto-rows-min short:grid-cols-1 short:content-start lg:grid-cols-2"
+                  : "lg:grid-cols-4"
+              }`}
+            >
+              {shownOptions.map((p, i) => (
+                <li key={p.name}>
+                  <button
+                    type="button"
+                    onClick={() => actions.submitGuess(p.name)}
+                    className="card-arcade card-hover card-press pop flex h-full w-full items-center gap-2 p-3 text-left"
+                    style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
+                  >
+                    {hideNames ? (
+                      // Frenzy "scribble out the names": the avatar redacts to a
+                      // solid black tile and the name becomes the player's seeded
+                      // scribble (same scrawl the host gallery uses), wiping on
+                      // left-to-right — so you must place the artist from the
+                      // drawing alone, not by reading the roster.
+                      <span
+                        aria-hidden
+                        className="h-9 w-9 shrink-0 rounded-lg border border-foreground/25 bg-black"
+                      />
+                    ) : (
+                      <Avatar name={p.name} className="h-9 w-9 rounded-lg" />
+                    )}
+                    {hideNames ? (
+                      <Scribble
+                        seed={p.name}
+                        className="scribble-wipe h-5 w-full max-w-32 min-w-0 select-none text-foreground"
+                      />
+                    ) : (
+                      <span dir="auto" className="truncate font-semibold">
+                        {p.name}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </EffectLayer>
         )}
       </div>
     </div>
@@ -284,6 +370,8 @@ export function PlayerReveal({
   const reveal = useGameStore((s) => s.reveal);
   const players = useGameStore((s) => s.players);
   const round = useGameStore((s) => s.round);
+  const mode = useGameStore((s) => s.mode);
+  const answer = useGameStore((s) => s.currentDrawing);
   const totalRounds = useGameStore((s) => s.totalRounds);
   const featureIndex = useGameStore((s) => s.featureIndex);
   const featureCount = useGameStore((s) => s.featureCount);
@@ -366,6 +454,15 @@ export function PlayerReveal({
               </>
             )}
           </div>
+
+          {mode === "flipped" && answer.length > 0 && (
+            <div className="card-arcade tape mt-3 flex shrink-0 flex-col gap-3 p-4 lg:mt-0 lg:flex-1">
+              <span className="font-hand text-xl text-muted">
+                {reveal?.artist ? `${reveal.artist}'s doodle` : "the answer"}
+              </span>
+              <StrokesView strokes={answer} />
+            </div>
+          )}
 
           {mine.length > 0 && (
             // mt-3 leaves room for the tape strip so it doesn't touch the card above

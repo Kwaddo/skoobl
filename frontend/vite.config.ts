@@ -15,6 +15,17 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("socket.io-client")) return "vendor";
+          if (id.includes("qrcode.react") || id.includes("react-colorful"))
+            return "draw";
+        },
+      },
+    },
+  },
   // Pre-bundle deps that are otherwise discovered lazily on first load. Without
   // this, Vite re-optimizes mid-session and force-reloads the page, which yanks
   // the live Socket.IO connection and spams the proxy log with ECONNRESET/EPIPE.
@@ -40,5 +51,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Node 26 adds experimental localStorage/sessionStorage to globalThis, which
+    // prevents vitest's populateGlobal from overriding them with jsdom's working
+    // implementations. The setup file re-binds them from window explicitly.
+    setupFiles: ["./src/test-setup.ts"],
   },
 });

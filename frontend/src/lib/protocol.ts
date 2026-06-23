@@ -14,6 +14,9 @@ export type Phase = "lobby" | "drawing" | "guessing" | "reveal" | "ended";
 // all other UI text stays English.
 export type Language = "en" | "ar";
 
+// Round variant. Classic is the current game; flipped is "Whose Doodle".
+export type GameMode = "classic" | "flipped" | "frenzy";
+
 export interface Point {
   x: number;
   y: number;
@@ -25,6 +28,33 @@ export interface Stroke {
   points: Point[];
   // A flood-fill op: points[0] is the seed, color is the fill color.
   fill?: boolean;
+}
+
+// A Frenzy sabotage item.
+export type Powerup =
+  | "fog"
+  | "lights"
+  | "flip"
+  | "cramp"
+  | "squint"
+  | "curtain"
+  | "shuffle"
+  | "hidenames";
+
+// An active effect inflicted on this client by a Frenzy effect wave. startsAt is
+// when it begins striking (unix ms): the server staggers it into the near future
+// so the hit lands at an unpredictable moment, and the client only renders the
+// effect once startsAt has passed. Absent/0 means strike immediately.
+export interface ActiveEffect {
+  kind: Powerup;
+  startsAt?: number;
+  endsAt: number;
+}
+
+// One anonymized candidate doodle in flipped guessing.
+export interface PoolDrawing {
+  id: string;
+  strokes: Stroke[];
 }
 
 export interface Player {
@@ -47,6 +77,7 @@ export interface GameState {
   code: string;
   phase: Phase;
   host: string;
+  mode?: GameMode;
   // true ⇒ the host is also a player (no separate display screen); false ⇒ the
   // host is the non-playing big screen.
   hostPlays?: boolean;
@@ -62,6 +93,10 @@ export interface GameState {
   drawMs?: number;
   guessMs?: number;
   phaseEndsAt?: number;
+  // Frozen at game end so the results banner names the real champion regardless of
+  // who leaves the results screen afterwards.
+  winner?: string;
+  winnerScore?: number;
   // Server clock at the moment this state was sent (unix ms). Used to correct the
   // countdown for device clock skew so every client agrees on the time left.
   serverNow?: number;
@@ -74,11 +109,21 @@ export interface GameState {
   youAreArtist?: boolean;
   yourGuess?: string;
   reveal?: Reveal | null;
+  // Flipped guessing only.
+  target?: string;
+  youAreTarget?: boolean;
+  pool?: PoolDrawing[];
+  // Guessing phase: artists already revealed earlier this round. Each player draws
+  // once, so these can't be the current drawing's artist — dropped from the options.
+  revealed?: string[];
   // Reveal phase, host only: artists already revealed this round, so the gallery
   // shows their names and keeps the not-yet-guessed drawings' names hidden.
   roundFeatured?: string[];
   // Final frame sent when the host leaves: the room is gone, kick to the menu.
   closed?: boolean;
+  // Frenzy-mode recipient-specific field: effects currently inflicted on this
+  // client by the room-wide effect waves.
+  yourEffects?: ActiveEffect[];
 }
 
 // GameConfig is the host's lobby setup sent via the "configure" event.
@@ -88,6 +133,7 @@ export interface GameConfig {
   categories: string[];
   drawMs: number;
   guessMs: number;
+  mode: GameMode;
 }
 
 export interface ServerError {

@@ -1,5 +1,4 @@
 import {
-  type PointerEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -15,125 +14,426 @@ import {
   CANVAS_W,
   drawStrokes,
   PALETTE,
+  rgbToHex,
+  strokePath,
 } from "@/lib/canvas";
-import type { Point, Stroke } from "@/lib/protocol";
-import { Brush, Bucket, Trash, Undo } from "../icons";
+import type { Point, Powerup, Stroke } from "@/lib/protocol";
+import { EffectLayer } from "../display/EffectLayer";
+import { Brush, Bucket, Pipette, Trash, Undo } from "../icons";
+
+// Total points we keep locally, mirroring the backend cap (room.go maxPointsTotal)
+// so what's drawn is exactly what the server accepts — and, crucially, so a
+// non-stop scribble can't grow the canvas without bound and kill the tab.
+const MAX_POINTS_TOTAL = 40_000;
+// A single live stroke is split into a fresh continuing segment past this many
+// points. Repainting the in-progress stroke is O(its length) every frame, so an
+// unbounded stroke degrades to O(n²) and eventually freezes; baking each segment
+// into the baseline keeps every frame cheap. Well under the backend's 3000/stroke
+// cap, and high enough that ordinary strokes never split.
+const SEGMENT_POINTS = 1_000;
 
 // DrawingCanvas is the interactive drawing surface plus its toolbar (color
-// picker, pen/fill tools, brush sizes, undo, clear). It owns the strokes and
-// reports them up via
-// onChange so the parent can submit them. When `disabled`, input is ignored
-// (used after the player locks in their drawing). `footer` (e.g. the Lock-in
-// button) is rendered with the toolbar — under the tools when tall, in the side
-// column when short — so it's never stranded at the bottom of the page.
+// picker, pen/fill/eyedropper tools, brush sizes, undo, clear). It owns the strokes in a
+// ref and reports them up via onChange / onDraftAppend / onDraftReplace so the
+// parent can submit them. When `disabled`, input is ignored (used after the
+// player locks in their drawing). `footer` (e.g. the Lock-in button) is
+// rendered with the toolbar — under the tools when tall, in the side column
+// when short — so it's never stranded at the bottom of the page.
 export function DrawingCanvas({
   disabled = false,
+  effects = new Set<Powerup>(),
   onChange,
-  onStrokeEnd,
+  onDraftAppend,
+  onDraftReplace,
   footer,
 }: {
   disabled?: boolean;
+  effects?: Set<Powerup>;
   onChange?: (strokes: Stroke[]) => void;
-  onStrokeEnd?: (strokes: Stroke[]) => void;
+  onDraftAppend?: (strokes: Stroke[]) => void;
+  onDraftReplace?: (strokes: Stroke[]) => void;
   footer?: React.ReactNode;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [color, setColor] = useState<string>(PALETTE[1]);
   const [width, setWidth] = useState<number>(BRUSHES[1]);
-  const [tool, setTool] = useState<"pen" | "fill">("pen");
+  const [tool, setTool] = useState<"pen" | "fill" | "eyedrop">("pen");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
+  // `count` drives only the undo/clear enabled state — it updates once per
+  // committed change (stroke end / fill / undo / clear), never per point.
+  const [count, setCount] = useState(0);
   const colorRef = useRef<HTMLDivElement>(null);
   const penRef = useRef<HTMLDivElement>(null);
+
+  // Strokes are the source of truth, held imperatively so the hot pointer path
+  // never touches React state.
+  const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
+  const rectRef = useRef<DOMRect | null>(null);
+  // Offscreen baseline buffer holding every stroke committed BEFORE the active
+  // one. While drawing we restore this and repaint only the live stroke over it
+  // each frame, so overlapping segments of the stroke are never double-painted.
+  const offRef = useRef<HTMLCanvasElement | null>(null);
+  // Offscreen compositor. Each frame we assemble `baseline + live stroke` here,
+  // then present the visible (desynchronized) canvas with a SINGLE drawImage of
+  // this buffer. A desynchronized backbuffer can scan out to the screen
+  // asynchronously to our JS, so wiping-then-repainting directly on it lets the
+  // display catch the half-cleared intermediate state (a tear/flicker on fast
+  // strokes). Composing off-screen and blitting once means the visible canvas
+  // only ever transitions between two complete frames — nothing half-drawn to
+  // tear to.
+  const frameRef = useRef<HTMLCanvasElement | null>(null);
+  // Draft-sync bookkeeping: how many strokes the server already has, and whether
+  // the last change was destructive (undo/clear → must replace, not append).
+  const syncedRef = useRef(0);
+  const destructiveRef = useRef(false);
+  const flushTimerRef = useRef<number | null>(null);
+  const pendingRef = useRef(false);
+  // Running total of points across all strokes, so the per-move cap check is O(1)
+  // (no scanning the whole strokes array each pointer event).
+  const pointCountRef = useRef(0);
 
+  const crampLocked = effects.has("cramp");
+  const inputDisabled = disabled || crampLocked;
+
+  // On a short, wide viewport (a low browser window in landscape) a bottom bar
+  // would steal the scarce vertical room from the canvas. Past this breakpoint we
+  // move the bar into a side column so the canvas can take the full height.
+  const [sideBar, setSideBar] = useState(false);
   useEffect(() => {
-    const ctx = ref.current?.getContext("2d");
-    if (ctx) drawStrokes(ctx, strokes);
-  }, [strokes]);
+    const mq = window.matchMedia(
+      "(max-height: 700px) and (orientation: landscape)",
+    );
+    const sync = () => setSideBar(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
+  // `desynchronized` is the low-latency inking hint: it lets the browser skip
+  // some compositing sync so strokes track the pointer with minimal lag. We do
+  // NOT set `willReadFrequently` — that would pin the canvas to the CPU backend
+  // (killing GPU acceleration on the hot pen path); the only pixel reads are a
+  // single getImageData per flood-fill or eyedropper tap, fine on a GPU context.
+  const getCtx = useCallback(
+    () => ref.current?.getContext("2d", { desynchronized: true }) ?? null,
+    [],
+  );
+
+  const redrawAll = useCallback(() => {
+    const ctx = getCtx();
+    if (ctx) drawStrokes(ctx, strokesRef.current);
+  }, [getCtx]);
+
+  // offCtx returns the offscreen baseline buffer's context, allocating lazily.
+  const offCtx = useCallback(() => {
+    let off = offRef.current;
+    if (!off) {
+      off = document.createElement("canvas");
+      off.width = CANVAS_W;
+      off.height = CANVAS_H;
+      offRef.current = off;
+    }
+    return off.getContext("2d");
+  }, []);
+
+  // frameCtx returns the offscreen compositor's context, allocating lazily.
+  const frameCtx = useCallback(() => {
+    let frame = frameRef.current;
+    if (!frame) {
+      frame = document.createElement("canvas");
+      frame.width = CANVAS_W;
+      frame.height = CANVAS_H;
+      frameRef.current = frame;
+    }
+    return frame.getContext("2d");
+  }, []);
+
+  // snapshotCommitted copies the live canvas (everything already painted) into the
+  // offscreen buffer — the baseline restored behind each frame of the live stroke.
+  const snapshotCommitted = useCallback(() => {
+    const main = ref.current;
+    const octx = offCtx();
+    if (!main || !octx) return;
+    octx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    octx.drawImage(main, 0, 0);
+  }, [offCtx]);
+
+  // paintLive assembles one frame in the offscreen compositor — the committed
+  // baseline plus the in-progress stroke — then presents it to the visible
+  // (desynchronized) canvas in a SINGLE drawImage, so the screen never catches a
+  // half-cleared state mid-stroke (see frameRef). We draw only the REAL sampled
+  // points — no speculative predicted tail. Browser pointer prediction
+  // (getPredictedEvents) overshoots on fast strokes, painting a ghost line ahead
+  // of the cursor that flickers as it's corrected and wiped each frame; the
+  // coalesced real samples already keep fast strokes smooth, so prediction isn't
+  // worth that artifact. Drawing the whole live stroke each frame keeps it pixel-
+  // identical to drawStrokes (so smoothing matches what everyone else renders) at
+  // a cost of just one stroke.
+  const paintLive = useCallback(() => {
+    const ctx = getCtx();
+    if (!ctx) return;
+    const off = offRef.current;
+    const fctx = frameCtx();
+    const frame = frameRef.current;
+    if (!off || !fctx || !frame) {
+      drawStrokes(ctx, strokesRef.current); // no buffer yet: full redraw
+      return;
+    }
+    // Lay the opaque baseline down first — it covers the whole buffer, so it
+    // fully overwrites the prior frame and no clear is needed — then the live
+    // stroke over it.
+    fctx.drawImage(off, 0, 0);
+    const cur = strokesRef.current[strokesRef.current.length - 1];
+    if (cur && !cur.fill) {
+      strokePath(fctx, cur.color, cur.width, cur.points);
+    }
+    ctx.drawImage(frame, 0, 0); // single atomic present to the visible canvas
+  }, [getCtx, frameCtx]);
+
+  // Paint the background once on mount and keep the cached rect fresh on resize
+  // (instead of reading getBoundingClientRect on every pointer move).
   useEffect(() => {
-    onChange?.(strokes);
-  }, [strokes, onChange]);
-
-  const toCanvas = useCallback((e: PointerEvent): Point => {
     const c = ref.current;
-    if (!c) return { x: 0, y: 0 };
-    const rect = c.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * CANVAS_W;
-    const y = ((e.clientY - rect.top) / rect.height) * CANVAS_H;
+    if (!c) return;
+    redrawAll();
+    rectRef.current = c.getBoundingClientRect();
+    const ro = new ResizeObserver(() => {
+      rectRef.current = c.getBoundingClientRect();
+    });
+    ro.observe(c);
+    return () => {
+      ro.disconnect();
+      if (flushTimerRef.current != null)
+        window.clearTimeout(flushTimerRef.current);
+    };
+  }, [redrawAll]);
+
+  // doFlush emits one draft delta: a full replace after a destructive edit
+  // (undo/clear removes strokes, which append can't express), else the COMPLETED
+  // strokes appended since the last sync. We only ever flush on a completed change
+  // (stroke end / fill / undo / clear), never mid-stroke, so the in-progress
+  // stroke is always whole here — no live full-replace. That's the optimization:
+  // the old per-frame replace re-serialized the entire (growing) strokes array
+  // every ~120ms, so a long drawing got progressively laggier; appending only the
+  // newly-finished strokes keeps each sync O(new), flat no matter how much is on
+  // the canvas. The tradeoff is that a hard disconnect mid-stroke loses only that
+  // one unfinished stroke (every completed stroke is already synced, and the
+  // buzzer auto-submit reads the full local strokes via onChange regardless).
+  const doFlush = useCallback(() => {
+    const strokes = strokesRef.current;
+    if (destructiveRef.current) {
+      destructiveRef.current = false;
+      syncedRef.current = strokes.length;
+      onDraftReplace?.(strokes);
+    } else if (strokes.length > syncedRef.current) {
+      const tail = strokes.slice(syncedRef.current);
+      syncedRef.current = strokes.length;
+      onDraftAppend?.(tail);
+    }
+  }, [onDraftAppend, onDraftReplace]);
+
+  // scheduleFlush throttles draft emits to ~120ms, coalescing bursts of rapid
+  // taps into a single trailing delta. Destructive changes (undo/clear) bypass
+  // throttling and flush immediately.
+  const scheduleFlush = useCallback(() => {
+    if (destructiveRef.current) {
+      // Cancel any pending throttle and flush now so the replace fires immediately.
+      if (flushTimerRef.current != null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+        pendingRef.current = false;
+      }
+      doFlush();
+      return;
+    }
+    if (flushTimerRef.current != null) {
+      pendingRef.current = true;
+      return;
+    }
+    doFlush();
+    flushTimerRef.current = window.setTimeout(function tick() {
+      flushTimerRef.current = null;
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        doFlush();
+        flushTimerRef.current = window.setTimeout(tick, 120);
+      }
+    }, 120);
+  }, [doFlush]);
+
+  const commit = useCallback(() => {
+    setCount(strokesRef.current.length);
+    onChange?.(strokesRef.current);
+    scheduleFlush();
+  }, [onChange, scheduleFlush]);
+
+  const toCanvas = useCallback((clientX: number, clientY: number): Point => {
+    const rect = rectRef.current ?? ref.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    const x = ((clientX - rect.left) / rect.width) * CANVAS_W;
+    const y = ((clientY - rect.top) / rect.height) * CANVAS_H;
     return {
       x: Math.max(0, Math.min(CANVAS_W, x)),
       y: Math.max(0, Math.min(CANVAS_H, y)),
     };
   }, []);
 
-  const start = (e: PointerEvent) => {
-    if (disabled || !e.isPrimary) return;
-    const p = toCanvas(e);
+  const start = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (inputDisabled || !e.isPrimary) return;
+    rectRef.current = ref.current?.getBoundingClientRect() ?? rectRef.current;
+    const p = toCanvas(e.clientX, e.clientY);
+    if (tool === "eyedrop") {
+      // Sample the single pixel under the tap and adopt its color. The canvas is
+      // painted on an opaque background, so every point yields a real color (the
+      // backdrop where empty, a stroke's color where drawn) — never transparent.
+      // Then snap straight back to the pen so the next stroke uses the new color.
+      const ctx = getCtx();
+      if (ctx) {
+        const x = Math.min(CANVAS_W - 1, Math.max(0, Math.floor(p.x)));
+        const y = Math.min(CANVAS_H - 1, Math.max(0, Math.floor(p.y)));
+        const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
+        setColor(rgbToHex(r, g, b));
+      }
+      setTool("pen");
+      return;
+    }
     if (tool === "fill") {
-      // A fill is a complete op on press: append the fill stroke and draft it.
-      const next = [...strokes, { color, width, points: [p], fill: true }];
-      setStrokes(next);
-      onStrokeEnd?.(next);
+      strokesRef.current = [
+        ...strokesRef.current,
+        { color, width, points: [p], fill: true },
+      ];
+      pointCountRef.current += 1;
+      redrawAll(); // a fill must replay to flood under existing pixels
+      commit();
       return;
     }
     e.currentTarget.setPointerCapture?.(e.pointerId);
     drawingRef.current = true;
-    setStrokes((prev) => [...prev, { color, width, points: [p] }]);
+    // Freeze the committed picture, then start the new stroke over that baseline.
+    snapshotCommitted();
+    strokesRef.current = [...strokesRef.current, { color, width, points: [p] }];
+    pointCountRef.current += 1;
+    paintLive(); // paints the initial dot
   };
 
-  const move = (e: PointerEvent) => {
-    if (disabled || !drawingRef.current || !e.isPrimary) return;
-    const p = toCanvas(e);
-    setStrokes((prev) => {
-      if (prev.length === 0) return prev;
-      const next = prev.slice();
-      const cur = next[next.length - 1];
-      next[next.length - 1] = { ...cur, points: [...cur.points, p] };
-      return next;
-    });
+  const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (inputDisabled || !drawingRef.current || !e.isPrimary) return;
+    let cur = strokesRef.current[strokesRef.current.length - 1];
+    if (!cur) return;
+    const native = e.nativeEvent as globalThis.PointerEvent;
+    // Coalesced events recover the high-frequency samples the OS batched into this
+    // frame's single move — drawing them all keeps fast strokes smooth, not jagged.
+    const coalesced = native.getCoalescedEvents?.() ?? [native];
+    for (const ev of coalesced) {
+      if (pointCountRef.current >= MAX_POINTS_TOTAL) break; // canvas full — stop
+      cur.points.push(toCanvas(ev.clientX, ev.clientY));
+      pointCountRef.current += 1;
+      // A long, non-stop stroke gets baked into the baseline and continued as a
+      // fresh segment, so the per-frame "repaint the live stroke" cost stays
+      // bounded (an unbounded stroke would grow O(n²) and crash the tab). The
+      // carried-over last point keeps the seam visually continuous.
+      if (cur.points.length >= SEGMENT_POINTS) {
+        paintLive(); // make sure the visible canvas holds the whole segment…
+        snapshotCommitted(); // …then fold it into the baseline buffer
+        const seam = cur.points[cur.points.length - 1];
+        cur = { color: cur.color, width: cur.width, points: [seam] };
+        strokesRef.current = [...strokesRef.current, cur];
+        pointCountRef.current += 1; // the duplicated seam point
+      }
+    }
+    paintLive();
+    // Keep the parent's copy current so an auto-submit at the buzzer captures the
+    // in-progress stroke. This is a cheap ref assignment — no draft flush here:
+    // the completed stroke is synced on pointer-up (see doFlush), so the hot
+    // pointer path never serializes the whole strokes array.
+    onChange?.(strokesRef.current);
   };
 
   const end = () => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
-    onStrokeEnd?.(strokes);
+    paintLive(); // settle on the final stroke
+    commit();
   };
 
+  const undo = () => {
+    if (strokesRef.current.length === 0) return;
+    const removed = strokesRef.current[strokesRef.current.length - 1];
+    pointCountRef.current -= removed?.points?.length ?? 0;
+    strokesRef.current = strokesRef.current.slice(0, -1);
+    destructiveRef.current = true;
+    redrawAll();
+    commit();
+  };
+
+  const clear = () => {
+    if (strokesRef.current.length === 0) return;
+    strokesRef.current = [];
+    pointCountRef.current = 0;
+    destructiveRef.current = true;
+    redrawAll();
+    commit();
+  };
+
+  // Two layouts. Tall (column): the canvas is a direct flex child (its wrapper is
+  // `contents`, so it adds no box) centered by two equal flex-1 spacers, the bar
+  // hugging beneath. Short + wide (row): the canvas gets a flex-1 slot on the left
+  // so it fills the height and fits the leftover width, and the bar moves to a
+  // side column on the right — no vertical space wasted on a bottom bar.
+  const rootCls = sideBar
+    ? "flex h-full min-h-0 flex-row justify-center gap-4"
+    : "flex h-full min-h-0 flex-col gap-3";
+  const canvasWrapCls = sideBar
+    ? "flex min-h-0 items-center justify-center"
+    : "contents";
+  const canvasCls = sideBar
+    ? "mx-auto aspect-4/3 max-h-full max-w-full rounded-2xl"
+    : "mx-auto min-h-0 aspect-4/3 w-full max-h-full rounded-2xl landscape:h-full landscape:w-auto landscape:max-w-full";
+  const barCls = sideBar
+    ? "flex w-fit shrink-0 flex-col items-stretch justify-center gap-3"
+    : "mx-auto flex w-fit max-w-full shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3";
+  // In the side-column (short) layout, lay the six tools out as a 3×2 grid (three
+  // per row) with a roomier gap, and scale the controls down so the bar stays
+  // compact and hands more room to the canvas. The descendant variants only reach
+  // the tool buttons/icons here — the popovers render through a portal to <body>,
+  // and Lock-in is a sibling, so neither is affected.
+  const toolsCls = sideBar
+    ? "grid grid-cols-3 place-items-center gap-3 [&_button]:h-8 [&_button]:w-8 [&_button]:rounded-md [&_button>span]:h-4 [&_button>span]:w-4 [&_svg]:h-4 [&_svg]:w-4"
+    : "flex flex-wrap items-center justify-center gap-2";
+
   return (
-    // Fills its slot; the canvas scales to fit. When the viewport is short, the
-    // toolbar moves to a column beside the canvas (instead of below, where it'd
-    // get cut off) so drawing always has room. ↓ tuned at 760px tall. On desktop
-    // (lg+) the same side-by-side layout kicks in so the canvas gets real width.
-    <div className="flex h-full min-h-0 flex-col items-stretch justify-center gap-3 short:flex-row short:justify-center short:gap-4 lg:flex-row lg:justify-center lg:gap-6">
-      {/* Canvas area grows to fill the leftover space (flex-1) in both layouts:
-          stacked, it claims the height above the tools so the canvas scales up as
-          large as the phone allows; short/landscape, it claims the width beside
-          the tools. flex (not grid) makes max-h-full reliably bound the canvas. */}
-      <div className="flex min-h-0 flex-1 items-center justify-center lg:max-w-176 lg:flex-initial">
-        <canvas
-          ref={ref}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          onPointerDown={start}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerLeave={end}
-          onPointerCancel={end}
-          className={`max-h-full max-w-full touch-none select-none rounded-2xl border-2 border-border bg-surface lg:max-h-[68vh] ${
-            disabled ? "opacity-70" : "cursor-crosshair"
-          }`}
-        />
+    <div className={rootCls}>
+      {!sideBar && <div className="min-h-0 flex-1" aria-hidden />}
+      <div className={canvasWrapCls}>
+        <EffectLayer effects={effects} className={canvasCls}>
+          <canvas
+            ref={ref}
+            width={CANVAS_W}
+            height={CANVAS_H}
+            onPointerDown={start}
+            onPointerMove={move}
+            onPointerUp={end}
+            onPointerLeave={end}
+            onPointerCancel={end}
+            className={`h-full w-full touch-none select-none rounded-2xl border-2 border-border bg-surface ${
+              inputDisabled ? "opacity-70" : "cursor-crosshair"
+            }`}
+          />
+        </EffectLayer>
       </div>
 
       {!disabled && (
-        <div className="flex shrink-0 flex-col gap-3 short:w-44 short:justify-center short:overflow-y-auto lg:w-60 lg:justify-center lg:overflow-y-auto lg:px-1.5">
-          {/* One wrapping cluster: it reflows to fit any width (a row under the
-              canvas when tall, a narrow column beside it when short) so no
-              control is ever clipped. Every control is a fixed 36px square. */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className={barCls}>
+          {/* One bottom action bar at every size: the tool cluster and the Lock-in
+              sit together, centered — tools then button, close, not flung to
+              opposite edges. The bar is w-fit (shrink-wrapped to its widest child,
+              the tool row) and centered; stacked, items-stretch makes Lock-in span
+              that same width, so it's never wider than the toolbar nor a tiny pill.
+              shrink-0 keeps it pinned while the canvas above flexes; Lock-in is
+              never pushed below the fold. Every control is a fixed 40px square. */}
+          <div className={toolsCls}>
             {/* Color — a swatch that opens a popover of presets plus a custom
                 picker, so common colors are one tap but anything is reachable. */}
             <div className="relative shrink-0" ref={colorRef}>
@@ -145,7 +445,7 @@ export function DrawingCanvas({
                   setSizeOpen(false);
                   setPaletteOpen((o) => !o);
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-border transition-colors hover:border-muted"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border-2 border-border transition-colors hover:border-muted"
               >
                 <span
                   className="h-5 w-5 rounded-md border border-black/20"
@@ -253,33 +553,59 @@ export function DrawingCanvas({
             >
               <Bucket className="h-5 w-5" />
             </ToolButton>
+            {/* Eyedropper — a one-shot tool: the next tap samples that pixel's
+                color and snaps back to the pen, so picking a color off the art
+                is a tap rather than a hunt through the palette. */}
+            <ToolButton
+              label="eyedropper tool"
+              title="Eyedropper — pick a color from the canvas"
+              active={tool === "eyedrop"}
+              onClick={() => {
+                setPaletteOpen(false);
+                setSizeOpen(false);
+                setTool("eyedrop");
+              }}
+            >
+              <Pipette className="h-5 w-5" />
+            </ToolButton>
 
             <ToolButton
               label="undo"
               title="Undo"
-              onClick={() => setStrokes((prev) => prev.slice(0, -1))}
-              disabled={strokes.length === 0}
+              onClick={undo}
+              disabled={count === 0}
             >
               <Undo className="h-5 w-5" />
             </ToolButton>
             <ToolButton
               label="clear"
               title="Clear all"
-              onClick={() => setStrokes([])}
-              disabled={strokes.length === 0}
+              onClick={clear}
+              disabled={count === 0}
             >
               <Trash className="h-5 w-5" />
             </ToolButton>
           </div>
 
-          {footer && <div className="shrink-0">{footer}</div>}
+          {footer && (
+            <div
+              className={
+                sideBar
+                  ? "flex justify-center [&>button]:h-9 [&>button]:px-4 [&>button]:text-sm"
+                  : "sm:shrink-0"
+              }
+            >
+              {footer}
+            </div>
+          )}
         </div>
       )}
+      {!sideBar && <div className="min-h-0 flex-1" aria-hidden />}
     </div>
   );
 }
 
-// ToolButton is one 36px-square control in the drawing toolbar — a toggle (pen /
+// ToolButton is one 40px-square control in the drawing toolbar — a toggle (pen /
 // fill / brush size) or an action (undo / clear). Active toggles get a primary
 // ring; disabled actions dim. Keeping every control the same square size lets the
 // toolbar wrap cleanly at any width without anything getting clipped.
@@ -305,7 +631,7 @@ function ToolButton({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 transition-colors disabled:opacity-40 ${
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-2 transition-colors disabled:opacity-40 ${
         active
           ? "border-primary bg-surface-2 text-foreground"
           : "border-border text-muted hover:border-muted hover:text-foreground"

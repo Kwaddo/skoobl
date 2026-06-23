@@ -67,9 +67,14 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 	sock.On("nextPhase", func(...any) { c.submit(game.Command{Kind: game.CmdNextPhase}) })
 	sock.On("returnToLobby", func(...any) { c.submit(game.Command{Kind: game.CmdReturnToLobby}) })
 	sock.On("submitDrawing", func(args ...any) { c.submitDrawing(args) })
-	sock.On("draftDrawing", func(args ...any) { c.draftDrawing(args) })
+	sock.On("draftAppend", func(args ...any) { c.draftStrokes(args, game.CmdDraftAppend) })
+	sock.On("draftReplace", func(args ...any) { c.draftStrokes(args, game.CmdDraftReplace) })
 	sock.On("submitGuess", func(args ...any) {
-		c.submit(game.Command{Kind: game.CmdSubmitGuess, Guess: strings.TrimSpace(stringField(args, "artist"))})
+		c.submit(game.Command{
+			Kind:    game.CmdSubmitGuess,
+			Guess:   strings.TrimSpace(stringField(args, "artist")),
+			GuessID: strings.TrimSpace(stringField(args, "id")),
+		})
 	})
 	sock.On("leave", func(...any) { c.leaveRoom() })
 	sock.On("disconnect", func(...any) { c.onDisconnect() })
@@ -129,7 +134,7 @@ func (c *conn) join(h *hub.Hub, args []any) {
 			case <-done:
 				return
 			case s := <-updates:
-				_ = c.sock.Emit("state", stateMap(s))
+				_ = c.sock.Emit("state", envelope(s))
 			}
 		}
 	}()
@@ -169,16 +174,18 @@ func (c *conn) submitDrawing(args []any) {
 	c.submit(game.Command{Kind: game.CmdSubmitDrawing, Strokes: payload.Strokes})
 }
 
-// draftDrawing forwards a player's in-progress strokes during the drawing phase.
-// Same shape as submitDrawing, but does not lock the drawing in.
-func (c *conn) draftDrawing(args []any) {
+// draftStrokes forwards a player's in-progress strokes during the drawing phase.
+// kind is CmdDraftAppend (new strokes since the last sync) or CmdDraftReplace
+// (full rewrite after undo/clear). Same payload shape as submitDrawing; never
+// locks the drawing in.
+func (c *conn) draftStrokes(args []any, kind game.CmdKind) {
 	var payload struct {
 		Strokes []game.Stroke `json:"strokes"`
 	}
 	if !decodeArg(args, &payload) {
 		return
 	}
-	c.submit(game.Command{Kind: game.CmdDraftDrawing, Strokes: payload.Strokes})
+	c.submit(game.Command{Kind: kind, Strokes: payload.Strokes})
 }
 
 // onDisconnect tears down the room subscription when the socket drops. A single
@@ -214,17 +221,19 @@ func (c *conn) emitError(msg string) {
 	_ = c.sock.Emit("error", map[string]any{"message": msg})
 }
 
-// stateMap converts GameState to a map via its JSON tags so the payload keys
-// match the frontend protocol exactly, independent of the parser's struct
-// encoding. It stamps serverNow (the server's clock at emit time) so clients can
-// correct for device clock skew when rendering the phaseEndsAt countdown —
-// otherwise a host whose clock differs from a player's shows a different timer.
-func stateMap(s game.GameState) map[string]any {
-	b, _ := json.Marshal(s)
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	m["serverNow"] = time.Now().UnixMilli()
-	return m
+// stateEnvelope wraps a redacted GameState with the server's send-time clock so
+// clients can correct for device skew, without the marshal→unmarshal round-trip
+// the old map form required.
+type stateEnvelope struct {
+	game.GameState
+	ServerNow int64 `json:"serverNow"`
+}
+
+// envelope constructs a stateEnvelope stamped with the current server time.
+// All GameState fields are promoted to the top level of the JSON payload alongside
+// serverNow — no nesting, matching the protocol the frontend expects.
+func envelope(s game.GameState) stateEnvelope {
+	return stateEnvelope{GameState: s, ServerNow: time.Now().UnixMilli()}
 }
 
 // decodeArg re-marshals the first event argument (a decoded JSON object) into a

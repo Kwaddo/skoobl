@@ -1,4 +1,4 @@
-import type { Stroke } from "./protocol";
+import type { Point, Stroke } from "./protocol";
 
 // Fixed logical canvas resolution. Strokes are stored in this coordinate space so
 // every viewer renders the same picture regardless of their display size. MUST
@@ -42,6 +42,15 @@ export function hexToRgba(hex: string): [number, number, number, number] {
   const n = Number.parseInt(h.slice(0, 6), 16);
   const a = h.length >= 8 ? Number.parseInt(h.slice(6, 8), 16) : 255;
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255, a];
+}
+
+// rgbToHex formats an [r,g,b] channel triple (0-255) as a lowercase #rrggbb —
+// the inverse of hexToRgba's parse, used to turn a sampled canvas pixel (from the
+// eyedropper) back into a palette-compatible hex color.
+export function rgbToHex(r: number, g: number, b: number): string {
+  const h = (n: number) =>
+    Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
 }
 
 // floodFill paints the 4-connected region of pixels matching the seed color
@@ -102,6 +111,52 @@ export function pngFilename(round: number): string {
   return `skoobl-round-${round}.png`;
 }
 
+// strokePath traces one pen stroke as a smooth quadratic-midpoint curve and
+// strokes it. Raw pointer samples are jittery; drawing straight segments between
+// them looks faceted, so each interior sample becomes the control point of a
+// quadratic curve whose endpoints are the midpoints to its neighbours — a smooth
+// line that still passes near every sample. This is the SINGLE smoothing routine
+// shared by the live canvas, the read-only viewer, and the PNG export, so a
+// stroke looks identical for the drawer, watchers, and the download. The caller
+// owns background/clears; this only sets stroke style and paints the path.
+export function strokePath(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  width: number,
+  pts: Point[],
+): void {
+  if (pts.length === 0) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  const first = pts[0];
+  ctx.moveTo(first.x, first.y);
+  if (pts.length === 1) {
+    // A single tap: nudge so the round line cap renders as a dot.
+    ctx.lineTo(first.x + 0.01, first.y + 0.01);
+    ctx.stroke();
+    return;
+  }
+  if (pts.length === 2) {
+    ctx.lineTo(pts[1].x, pts[1].y);
+    ctx.stroke();
+    return;
+  }
+  // Curve through midpoints, using each sample as the control point.
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2;
+    const my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  // Final leg: curve from the last midpoint to the last sample.
+  const a = pts[pts.length - 2];
+  const b = pts[pts.length - 1];
+  ctx.quadraticCurveTo(a.x, a.y, b.x, b.y);
+  ctx.stroke();
+}
+
 // drawStrokes paints a full strokes list onto a 2D context sized CANVAS_W ×
 // CANVAS_H. Used by both the interactive canvas and the read-only viewer.
 export function drawStrokes(
@@ -110,9 +165,10 @@ export function drawStrokes(
 ): void {
   ctx.fillStyle = CANVAS_BG;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  for (const s of strokes) {
+  // Tolerate a null/garbled list or stroke (a blank lock-in can serialize a
+  // gallery entry as JSON null) — just paint the blank background instead.
+  for (const s of strokes ?? []) {
+    if (!s?.points) continue;
     if (s.fill) {
       const seed = s.points[0];
       if (!seed) continue;
@@ -130,18 +186,7 @@ export function drawStrokes(
       continue;
     }
     if (!s.points.length) continue;
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = s.width;
-    ctx.beginPath();
-    const [first, ...rest] = s.points;
-    ctx.moveTo(first.x, first.y);
-    if (rest.length === 0) {
-      // A single tap: nudge so the round line cap renders as a dot.
-      ctx.lineTo(first.x + 0.01, first.y + 0.01);
-    } else {
-      for (const p of rest) ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
+    strokePath(ctx, s.color, s.width, s.points);
   }
 }
 

@@ -1,0 +1,94 @@
+import type { PoolDrawing, Powerup } from "@/lib/protocol";
+import { StrokesView } from "../canvas/StrokesView";
+import { Brush } from "../icons";
+import { EffectLayer } from "./EffectLayer";
+import { FeatureProgress } from "./FeatureProgress";
+import { Timer } from "./Timer";
+
+// FlippedGuessing renders the "Whose Doodle" guess: a target name and a grid of
+// anonymized candidate doodles. Pass onPick to make the tiles tappable (player
+// controller); omit it for a read-only display (host TV).
+export function FlippedGuessing({
+  target,
+  pool,
+  youAreTarget = false,
+  alreadyGuessed = false,
+  remaining,
+  guessMs,
+  featureIndex,
+  featureCount,
+  onPick,
+  effects = new Set<Powerup>(),
+}: {
+  target: string;
+  pool: PoolDrawing[];
+  youAreTarget?: boolean;
+  alreadyGuessed?: boolean;
+  remaining: number | null;
+  guessMs: number;
+  featureIndex: number;
+  featureCount: number;
+  onPick?: (id: string) => void;
+  effects?: Set<Powerup>;
+}) {
+  const shuffled = effects.has("shuffle")
+    ? [...pool].sort((a, b) => a.id.localeCompare(b.id)).reverse()
+    : pool;
+
+  return (
+    <div className="m-auto flex w-full max-h-full min-h-0 flex-col gap-4 lg:max-w-5xl">
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <div className="flex flex-col gap-2">
+          <h2 className="ink-underline w-fit font-display text-2xl font-black">
+            Which doodle is{" "}
+            <span dir="auto" className="text-foreground">
+              {target || "…"}
+            </span>
+            's?
+          </h2>
+          <FeatureProgress index={featureIndex} count={featureCount} />
+        </div>
+        <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
+      </div>
+
+      {youAreTarget ? (
+        <p className="ink-block tilt-r flex items-center justify-center gap-2 px-5 py-6 text-center font-hand text-2xl leading-tight text-muted">
+          <Brush className="h-5 w-5 shrink-0 text-foreground" />
+          they're hunting for your doodle — sit tight.
+        </p>
+      ) : alreadyGuessed ? (
+        <p className="ink-block tilt-l px-5 py-6 text-center font-hand text-2xl leading-tight text-muted">
+          locked in — waiting for the reveal…
+        </p>
+      ) : (
+        <EffectLayer effects={effects} className="min-h-0 flex-1">
+          {/* pt-5 leaves room above the top row so each tile's tape strip can
+              overhang the tile's top edge (onto the page) instead of being
+              clipped inside it — the realistic "taped to the wall" look. */}
+          <ul
+            key={`pool-${featureIndex}`}
+            className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto px-1 pt-5 pb-1 sm:grid-cols-3 lg:grid-cols-4"
+          >
+            {shuffled.map((d, i) => (
+              <li key={d.id}>
+                <button
+                  type="button"
+                  disabled={!onPick}
+                  onClick={() => onPick?.(d.id)}
+                  className="card-arcade card-hover card-press pop tape block aspect-4/3 w-full p-1"
+                  style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
+                >
+                  {/* inner wrapper keeps the doodle clipped to rounded corners
+                      now that the tile itself no longer hides its overflow. */}
+                  <span className="block h-full w-full overflow-hidden rounded-lg">
+                    <StrokesView strokes={d.strokes} className="h-full w-full" />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </EffectLayer>
+      )}
+    </div>
+  );
+}

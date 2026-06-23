@@ -1243,6 +1243,46 @@ func TestSanitizeRejectsBadFillColor(t *testing.T) {
 	}
 }
 
+// syncLobby joins a host display ("tv") plus players and stops in the lobby
+// (unlike syncRoom, which also starts the game). The tv is the host, so it may
+// configure.
+func syncLobby(t *testing.T, players ...string) *Room {
+	t.Helper()
+	r := NewRoom("lobby1")
+	r.handle(Command{Kind: CmdJoin, Player: "tv", Spectator: true,
+		Subscribe: make(chan GameState, 64), Ack: make(chan string, 1)})
+	for _, n := range players {
+		r.handle(Command{Kind: CmdJoin, Player: n,
+			Subscribe: make(chan GameState, 64), Ack: make(chan string, 1)})
+	}
+	if r.state.Phase != PhaseLobby {
+		t.Fatalf("phase = %q, want lobby", r.state.Phase)
+	}
+	return r
+}
+
+func TestModeConfiguredAndEchoed(t *testing.T) {
+	r := syncLobby(t, "alice", "bob", "carol", "dave")
+
+	r.handle(Command{Kind: CmdConfigure, Player: "tv", Config: &Config{
+		Rounds: 3, Mode: ModeFlipped, DrawMs: 60000, GuessMs: 25000,
+	}})
+	if r.state.Mode != ModeFlipped {
+		t.Fatalf("mode = %q, want flipped", r.state.Mode)
+	}
+	if v := r.state.viewFor("alice", r.present); v.Mode != ModeFlipped {
+		t.Fatalf("view mode = %q, want flipped (must be public)", v.Mode)
+	}
+
+	// Unknown mode falls back to classic.
+	r.handle(Command{Kind: CmdConfigure, Player: "tv", Config: &Config{
+		Rounds: 3, Mode: "wat", DrawMs: 60000, GuessMs: 25000,
+	}})
+	if r.state.Mode != ModeClassic {
+		t.Fatalf("mode = %q, want classic fallback", r.state.Mode)
+	}
+}
+
 // syncRoom builds a room and joins a host + the given players by calling handle
 // directly (no Run goroutine), then starts the game. Returns the room in the
 // drawing phase.
@@ -1263,9 +1303,56 @@ func syncRoom(t *testing.T, players ...string) *Room {
 }
 
 func draft(r *Room, name string) {
-	r.handle(Command{Kind: CmdDraftDrawing, Player: name, Strokes: []Stroke{
+	r.handle(Command{Kind: CmdDraftAppend, Player: name, Strokes: []Stroke{
 		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
 	}})
+}
+
+func TestWinnerFrozenAtGameEndSurvivesLeave(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	// Make bob the clear champion.
+	for i := range r.state.Players {
+		if r.state.Players[i].Name == "bob" {
+			r.state.Players[i].Score = 50
+		} else {
+			r.state.Players[i].Score = 10
+		}
+	}
+
+	r.endGame()
+	if r.state.Phase != PhaseEnded {
+		t.Fatalf("phase = %q, want ended", r.state.Phase)
+	}
+	if r.state.Winner != "bob" || r.state.WinnerScore != 50 {
+		t.Fatalf("frozen winner = (%q,%d), want (bob,50)", r.state.Winner, r.state.WinnerScore)
+	}
+
+	// The winner leaves the results screen: the frozen winner must NOT shift to the
+	// next-highest remaining player.
+	r.handle(Command{Kind: CmdLeave, Player: "bob", Unsub: make(chan GameState, 1)})
+	if _, gone := r.present["bob"]; gone {
+		t.Fatal("bob should have left")
+	}
+	if r.state.Winner != "bob" || r.state.WinnerScore != 50 {
+		t.Fatalf("after winner left, winner = (%q,%d), want (bob,50) still frozen", r.state.Winner, r.state.WinnerScore)
+	}
+	// And the remaining players' views still carry the frozen champion.
+	if av := r.state.viewFor("alice", r.present); av.Winner != "bob" || av.WinnerScore != 50 {
+		t.Fatalf("view winner = (%q,%d), want (bob,50)", av.Winner, av.WinnerScore)
+	}
+}
+
+func TestReturnToLobbyClearsWinner(t *testing.T) {
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	r.state.Players[0].Score = 30
+	r.endGame()
+	if r.state.Winner == "" {
+		t.Fatal("winner should be set at game end")
+	}
+	r.handle(Command{Kind: CmdReturnToLobby, Player: "tv"})
+	if r.state.Winner != "" || r.state.WinnerScore != 0 {
+		t.Fatalf("return-to-lobby must clear the winner: (%q,%d)", r.state.Winner, r.state.WinnerScore)
+	}
 }
 
 func TestDraftStoresWithoutAdvancing(t *testing.T) {
@@ -1499,8 +1586,9 @@ func TestRoundGuessesMultipleDistinctDrawings(t *testing.T) {
 }
 
 func TestFeatureCountCappedByDrawers(t *testing.T) {
-	// Six players would target three drawings, but only two actually draw — so the
-	// round can guess at most those two.
+	// Six players would target three drawings, but only two actually draw. With a
+	// two-drawer margin (so a revealed artist never forces the next guess), a
+	// two-drawer round guesses just one drawing.
 	r := syncRoom(t, "p1", "p2", "p3", "p4", "p5", "p6")
 	if got := guessesForPlayers(len(r.state.Players)); got != 3 {
 		t.Fatalf("guessesForPlayers(6) = %d, want 3 (precondition)", got)
@@ -1508,8 +1596,183 @@ func TestFeatureCountCappedByDrawers(t *testing.T) {
 	draft(r, "p1")
 	draft(r, "p2")
 	r.advance()
+	if r.state.FeatureCount != 1 {
+		t.Fatalf("featureCount = %d, want 1 (two drawers, two kept off-screen)", r.state.FeatureCount)
+	}
+}
+
+func TestFeatureCountLeavesTwoDrawerMargin(t *testing.T) {
+	// Eight players target three drawings, but only four draw. The two-drawer
+	// margin caps the round at two so the second (final) drawing still has real
+	// options once the first artist is struck from the choices.
+	r := syncRoom(t, "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8")
+	if got := guessesForPlayers(len(r.state.Players)); got != 3 {
+		t.Fatalf("guessesForPlayers(8) = %d, want 3 (precondition)", got)
+	}
+	for _, n := range []string{"p1", "p2", "p3", "p4"} {
+		draft(r, n)
+	}
+	r.advance()
 	if r.state.FeatureCount != 2 {
-		t.Fatalf("featureCount = %d, want 2 (capped by the two who drew)", r.state.FeatureCount)
+		t.Fatalf("featureCount = %d, want 2 (four drawers, two kept off-screen)", r.state.FeatureCount)
+	}
+}
+
+func TestRevealedArtistsHiddenFromGuessOptions(t *testing.T) {
+	// A 4-player round guesses two drawings. While the second is up for guessing,
+	// the first artist must be in `Revealed` (struck from the options) and the
+	// second — still secret — must not be.
+	r := syncRoom(t, "alice", "bob", "carol", "dave")
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		draft(r, n)
+	}
+	r.advance() // → guessing the first drawing
+	first := r.state.Featured
+
+	r.beginReveal()
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"}) // → guessing the second drawing
+	second := r.state.Featured
+
+	// Pick a guesser who is neither artist so the view is a real guesser's.
+	guesser := ""
+	for _, n := range []string{"alice", "bob", "carol", "dave"} {
+		if n != first && n != second {
+			guesser = n
+			break
+		}
+	}
+	v := r.state.viewFor(guesser, r.present)
+	if len(v.Revealed) != 1 || v.Revealed[0] != first {
+		t.Fatalf("revealed = %v, want exactly [%q]", v.Revealed, first)
+	}
+	for _, n := range v.Revealed {
+		if n == second {
+			t.Fatalf("revealed leaked the current (secret) artist %q", second)
+		}
+	}
+}
+
+func flippedRoomInGuessing(t *testing.T, names ...string) *Room {
+	t.Helper()
+	r := syncRoom(t, names...)
+	r.state.Mode = ModeFlipped // configured in the lobby; set directly for the unit test
+	for _, n := range names {
+		draft(r, n)
+	}
+	r.advance() // drawing timer → flipped guessing
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing", r.state.Phase)
+	}
+	return r
+}
+
+func TestFlippedGuessingView(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	target := r.state.Featured
+
+	guesser := "alice"
+	if target == "alice" {
+		guesser = "bob"
+	}
+	v := r.state.viewFor(guesser, r.present)
+	if v.Mode != ModeFlipped {
+		t.Fatalf("view mode = %q, want flipped", v.Mode)
+	}
+	if v.Target != target {
+		t.Fatalf("target = %q, want %q", v.Target, target)
+	}
+	if v.YouAreTarget {
+		t.Fatal("a non-target guesser must not see YouAreTarget")
+	}
+	if len(v.Pool) != 4 {
+		t.Fatalf("pool size = %d, want 4 (all drew, none revealed)", len(v.Pool))
+	}
+	if v.CurrentDrawing != nil {
+		t.Fatal("flipped guessing must not send a single currentDrawing")
+	}
+	for _, d := range v.Pool {
+		if d.ID == "" {
+			t.Fatal("pool drawing has no id")
+		}
+		for _, n := range names { // an id must never be a player name
+			if d.ID == n {
+				t.Fatalf("pool id %q leaks a player name", d.ID)
+			}
+		}
+	}
+
+	tv := r.state.viewFor(target, r.present)
+	if !tv.YouAreTarget {
+		t.Fatal("the target should see YouAreTarget")
+	}
+}
+
+func TestFlippedPoolDropsRevealedTarget(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	first := r.state.Featured
+	firstID := r.state.DrawIDs[first]
+
+	idsBefore := map[string]string{}
+	for k, v := range r.state.DrawIDs {
+		idsBefore[k] = v
+	}
+
+	r.beginReveal()
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"}) // → second feature
+
+	for k, v := range r.state.DrawIDs {
+		if idsBefore[k] != v {
+			t.Fatalf("draw id for %q changed across features (%q→%q)", k, idsBefore[k], v)
+		}
+	}
+
+	second := r.state.Featured
+	guesser := ""
+	for _, n := range names {
+		if n != first && n != second {
+			guesser = n
+			break
+		}
+	}
+	v := r.state.viewFor(guesser, r.present)
+	if len(v.Pool) != 3 {
+		t.Fatalf("pool size = %d, want 3 (first target removed)", len(v.Pool))
+	}
+	for _, d := range v.Pool {
+		if d.ID == firstID {
+			t.Fatal("a revealed target's doodle is still in the pool")
+		}
+	}
+}
+
+func TestFlippedPoolOrderedById(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	guesser := "alice"
+	if r.state.Featured == "alice" {
+		guesser = "bob"
+	}
+
+	v := r.state.viewFor(guesser, r.present)
+	if len(v.Pool) < 2 {
+		t.Fatalf("pool size = %d, want the full candidate set", len(v.Pool))
+	}
+	// The grid is shuffled by sorting on the opaque per-round id, decoupling a
+	// doodle's slot from roster order. Verify ascending-id order.
+	for i := 1; i < len(v.Pool); i++ {
+		if v.Pool[i-1].ID >= v.Pool[i].ID {
+			t.Fatalf("pool not ordered by id: %q is not before %q", v.Pool[i-1].ID, v.Pool[i].ID)
+		}
+	}
+	// Ids are fixed for the round, so the order is stable across broadcasts —
+	// tiles never jump mid-round. A second view yields the identical sequence.
+	v2 := r.state.viewFor(guesser, r.present)
+	for i := range v.Pool {
+		if v.Pool[i].ID != v2.Pool[i].ID {
+			t.Fatalf("pool order changed between views at %d: %q vs %q", i, v.Pool[i].ID, v2.Pool[i].ID)
+		}
 	}
 }
 
@@ -1527,5 +1790,257 @@ func TestEmptyLockInIsNotADrawing(t *testing.T) {
 	}
 	if got := r.state.LastDeltas["bob"]; got != 0 {
 		t.Fatalf("bob delta = %d, want 0 (an empty lock-in must not score)", got)
+	}
+}
+
+func TestFlippedCorrectGuessScores(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	target := r.state.Featured
+	targetID := r.state.DrawIDs[target]
+
+	for _, n := range names {
+		if n == target {
+			continue
+		}
+		r.handle(Command{Kind: CmdSubmitGuess, Player: n, GuessID: targetID})
+	}
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal once all non-targets matched", r.state.Phase)
+	}
+	for _, p := range r.state.Players {
+		if p.Name == target {
+			continue
+		}
+		if p.Score <= 0 {
+			t.Fatalf("%s scored %d, want > 0 for a correct flipped match", p.Name, p.Score)
+		}
+	}
+}
+
+func TestFlippedWrongAndUnknownId(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+	target := r.state.Featured
+
+	// A wrong (but valid) id: some non-target drawer's doodle.
+	wrongOwner := ""
+	for _, n := range names {
+		if n != target {
+			wrongOwner = n
+			break
+		}
+	}
+	wrongID := r.state.DrawIDs[wrongOwner]
+
+	// An unknown id is ignored entirely (no guess recorded).
+	r.handle(Command{Kind: CmdSubmitGuess, Player: pickGuesser(names, target), GuessID: "dffffffff"})
+	if _, ok := r.state.Guesses[pickGuesser(names, target)]; ok {
+		t.Fatal("an unknown id must not record a guess")
+	}
+
+	guesser := pickGuesser(names, target)
+	r.handle(Command{Kind: CmdSubmitGuess, Player: guesser, GuessID: wrongID})
+	if _, ok := r.state.Guesses[guesser]; !ok {
+		t.Fatal("a valid wrong id should record a (wrong) guess")
+	}
+	if r.state.Guesses[guesser] == target {
+		t.Fatal("a wrong id must not resolve to the target")
+	}
+}
+
+// pickGuesser returns the first name that is not the target.
+func pickGuesser(names []string, target string) string {
+	for _, n := range names {
+		if n != target {
+			return n
+		}
+	}
+	return ""
+}
+
+func TestFlippedRoundRunsTwoFeaturesAndAdvances(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+	r := flippedRoomInGuessing(t, names...)
+
+	// 4 drawers, two-drawer margin ⇒ two features this round (same as classic).
+	if r.state.FeatureCount != 2 {
+		t.Fatalf("featureCount = %d, want 2", r.state.FeatureCount)
+	}
+	first := r.state.Featured
+
+	// Everyone matches the first target's doodle, then the host reveals + advances.
+	guessAllCorrect(r, names, first)
+	if r.state.Phase != PhaseReveal {
+		t.Fatalf("phase = %q, want reveal after first feature", r.state.Phase)
+	}
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"})
+	if r.state.Phase != PhaseGuessing {
+		t.Fatalf("phase = %q, want guessing for the second feature", r.state.Phase)
+	}
+	second := r.state.Featured
+	if second == first {
+		t.Fatalf("featured the same target twice in one round: %q", second)
+	}
+
+	// Every non-target guesser must see the second target's drawing present but
+	// unlabeled — among at least two candidates, so it can't be identified by
+	// elimination. (The pool carries opaque ids only; no name→id map is sent.)
+	for _, n := range names {
+		if n == second {
+			continue
+		}
+		v := r.state.viewFor(n, r.present)
+		if len(v.Pool) < 2 {
+			t.Fatalf("non-target %s sees a pool of %d — too few to hide the target", n, len(v.Pool))
+		}
+		found := false
+		for _, d := range v.Pool {
+			if d.ID == r.state.DrawIDs[second] {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("non-target %s's pool is missing the (unlabeled) target drawing", n)
+		}
+	}
+
+	guessAllCorrect(r, names, second)
+	r.handle(Command{Kind: CmdNextPhase, Player: "tv"})
+	if r.state.Phase != PhaseDrawing || r.state.Round != 2 {
+		t.Fatalf("after the round: phase=%q round=%d, want drawing/2", r.state.Phase, r.state.Round)
+	}
+	if r.state.DrawIDs != nil {
+		t.Fatal("DrawIDs should be cleared at the start of a new round")
+	}
+}
+
+// guessAllCorrect has every non-target match the target's doodle id, driving the
+// feature to its reveal.
+func guessAllCorrect(r *Room, names []string, target string) {
+	id := r.state.DrawIDs[target]
+	for _, n := range names {
+		if n == target {
+			continue
+		}
+		r.handle(Command{Kind: CmdSubmitGuess, Player: n, GuessID: id})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Draft append/replace tests
+// ---------------------------------------------------------------------------
+
+// makePoints builds a slice of n points all at (1,1).
+func makePoints(n int) []Point {
+	pts := make([]Point, n)
+	for i := range pts {
+		pts[i] = Point{X: 1, Y: 1}
+	}
+	return pts
+}
+
+// newDrawingRoomWithSub starts a room with 4 players in the drawing phase and
+// returns it plus p1's broadcast channel.
+func newDrawingRoomWithSub(t *testing.T) (*Room, chan GameState) {
+	t.Helper()
+	r := NewRoom("draftsub1")
+	go r.Run()
+	t.Cleanup(r.Stop)
+
+	sub := make(chan GameState, 32)
+	joinSpec(t, r, "tv", make(chan GameState, 32))
+	joinOK(t, r, "p1", sub)
+	joinOK(t, r, "p2", make(chan GameState, 32))
+	joinOK(t, r, "p3", make(chan GameState, 32))
+	joinOK(t, r, "p4", make(chan GameState, 32))
+
+	r.Submit(Command{Kind: CmdStart, Player: "tv"})
+	awaitPhase(t, sub, PhaseDrawing)
+	return r, sub
+}
+
+func drainOne(t *testing.T, ch chan GameState) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected a broadcast to drain")
+	}
+}
+
+// drawingsFor synchronously reads a player's stored draft via the test-only
+// cmdTestReadDrawing probe command.
+func drawingsFor(t *testing.T, r *Room, name string) []Stroke {
+	t.Helper()
+	done := make(chan []Stroke, 1)
+	r.Submit(Command{Kind: cmdTestReadDrawing, Player: name, probe: done})
+	select {
+	case got := <-done:
+		return got
+	case <-time.After(time.Second):
+		t.Fatal("probe timed out")
+		return nil
+	}
+}
+
+func TestDraftAppendIsSilent(t *testing.T) {
+	r, sub := newDrawingRoomWithSub(t)
+	drain(sub) // drain any remaining broadcasts from entering the drawing phase
+
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}},
+	}})
+	// Use the test probe as a flush barrier: it is processed silently (no
+	// broadcast) after the draft, confirming the room goroutine has processed
+	// both commands before we assert silence.
+	_ = drawingsFor(t, r, "p1")
+
+	select {
+	case <-sub:
+		t.Fatal("draft append must not broadcast")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestDraftAppendAccumulates(t *testing.T) {
+	r, _ := newDrawingRoomWithSub(t)
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+	}})
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 5, Y: 5}}},
+	}})
+	got := drawingsFor(t, r, "p1")
+	if len(got) != 2 {
+		t.Fatalf("want 2 accumulated strokes, got %d", len(got))
+	}
+}
+
+func TestDraftReplaceOverwrites(t *testing.T) {
+	r, _ := newDrawingRoomWithSub(t)
+	r.Submit(Command{Kind: CmdDraftAppend, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 1, Y: 1}}},
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 2, Y: 2}}},
+	}})
+	r.Submit(Command{Kind: CmdDraftReplace, Player: "p1", Strokes: []Stroke{
+		{Color: "#ffffff", Width: 4, Points: []Point{{X: 9, Y: 9}}},
+	}})
+	got := drawingsFor(t, r, "p1")
+	if len(got) != 1 || got[0].Points[0].X != 9 {
+		t.Fatalf("replace should overwrite to a single stroke, got %#v", got)
+	}
+}
+
+func TestAppendBoundedStrokesCapsTotalPoints(t *testing.T) {
+	cur := []Stroke{{Color: "#ffffff", Width: 4, Points: makePoints(maxPointsTotal - 1)}}
+	add := []Stroke{{Color: "#ffffff", Width: 4, Points: makePoints(10)}}
+	out := appendBoundedStrokes(cur, add)
+	total := 0
+	for _, s := range out {
+		total += len(s.Points)
+	}
+	if total > maxPointsTotal {
+		t.Fatalf("combined points %d exceeds cap %d", total, maxPointsTotal)
 	}
 }
