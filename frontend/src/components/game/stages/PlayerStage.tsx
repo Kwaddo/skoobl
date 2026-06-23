@@ -152,16 +152,10 @@ export function PlayerDrawing({ actions }: { actions: GameActions }) {
             footer={
               <button
                 type="button"
-                className="btn-key w-full whitespace-nowrap px-6 py-4 text-lg short:px-3 short:py-2.5 short:text-sm lg:px-3 lg:py-2.5 lg:text-sm"
+                className="btn-key w-full whitespace-nowrap px-6 py-4 text-lg sm:w-auto sm:px-8"
                 onClick={submit}
               >
-                {/* full label when the button is full-width (stacked); the wide
-                    display font overflows the narrow side column (short/lg), so
-                    use a short label there instead of letting it clip */}
-                <span className="short:hidden lg:hidden">
-                  Lock in my drawing →
-                </span>
-                <span className="hidden short:inline lg:inline">Lock in →</span>
+                Lock in →
               </button>
             }
           />
@@ -254,26 +248,28 @@ export function PlayerGuessing({
         <Timer remaining={remaining} total={Math.round(guessMs / 1000)} />
       </div>
 
-      {/* `contents` keeps the mobile stack identical (no extra box); on desktop
-          it becomes the two-pane row holding the drawing and the guess list */}
-      <div className="contents lg:flex lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:gap-6">
+      {/* `contents` keeps the portrait stack identical (no extra box); on a
+          landscape phone (short) and on desktop (lg) it becomes the two-pane row
+          holding the drawing beside the guess list, so a tall drawing can't shove
+          the options off a short screen. */}
+      <div className="contents short:flex short:min-h-0 short:flex-1 short:flex-row short:items-stretch short:gap-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:gap-6">
         {showDrawing && (
           <EffectLayer
             key={`drawing-${featureIndex}`}
             effects={effects}
-            className="tape reveal-clip mt-2 aspect-4/3 max-h-[42vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] lg:mt-0 lg:aspect-auto lg:h-full lg:w-3/5 lg:shrink-0"
+            className="tape reveal-clip mt-2 aspect-4/3 max-h-[38vh] w-full overflow-hidden rounded-xl border-[2.5px] border-foreground bg-surface shadow-[5px_6px_0_0_var(--ink-edge)] short:mt-0 short:aspect-auto short:h-full short:w-3/5 short:shrink-0 lg:mt-0 lg:aspect-auto lg:h-full lg:w-3/5 lg:shrink-0"
           >
             <StrokesView strokes={drawing} className="h-full w-full" />
           </EffectLayer>
         )}
 
         {youAreArtist ? (
-          <p className="ink-block tilt-r flex items-center justify-center gap-2 px-5 py-6 text-center font-hand text-2xl leading-tight text-muted lg:flex-1">
+          <p className="ink-block tilt-r flex items-center justify-center gap-2 px-5 py-6 text-center font-hand text-2xl leading-tight text-muted short:flex-1 lg:flex-1">
             <Brush className="h-5 w-5 shrink-0 text-foreground" />
             this one's yours — sit tight while everyone guesses.
           </p>
         ) : yourGuess ? (
-          <p className="ink-block tilt-l px-5 py-6 text-center font-hand text-2xl leading-tight text-muted lg:flex-1 lg:self-center">
+          <p className="ink-block tilt-l px-5 py-6 text-center font-hand text-2xl leading-tight text-muted short:flex-1 short:self-center lg:flex-1 lg:self-center">
             you guessed{" "}
             <span
               dir="auto"
@@ -296,7 +292,9 @@ export function PlayerGuessing({
           >
             <ul
               className={`grid h-full grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:auto-rows-min lg:content-start ${
-                showDrawing ? "lg:grid-cols-2" : "lg:grid-cols-4"
+                showDrawing
+                  ? "short:grid-cols-1 lg:grid-cols-2"
+                  : "lg:grid-cols-4"
               }`}
             >
               {shownOptions.map((p, i) => (
