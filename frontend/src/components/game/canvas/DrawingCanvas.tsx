@@ -89,6 +89,20 @@ export function DrawingCanvas({
   const crampLocked = effects.has("cramp");
   const inputDisabled = disabled || crampLocked;
 
+  // On a short, wide viewport (a low browser window in landscape) a bottom bar
+  // would steal the scarce vertical room from the canvas. Past this breakpoint we
+  // move the bar into a side column so the canvas can take the full height.
+  const [sideBar, setSideBar] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(
+      "(max-height: 700px) and (orientation: landscape)",
+    );
+    const sync = () => setSideBar(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   // `desynchronized` is the low-latency inking hint: it lets the browser skip
   // some compositing sync so strokes track the pointer with minimal lag. We do
   // NOT set `willReadFrequently` — that would pin the canvas to the CPU backend
@@ -330,38 +344,54 @@ export function DrawingCanvas({
     commit();
   };
 
+  // Two layouts. Tall (column): the canvas is a direct flex child (its wrapper is
+  // `contents`, so it adds no box) centered by two equal flex-1 spacers, the bar
+  // hugging beneath. Short + wide (row): the canvas gets a flex-1 slot on the left
+  // so it fills the height and fits the leftover width, and the bar moves to a
+  // side column on the right — no vertical space wasted on a bottom bar.
+  const rootCls = sideBar
+    ? "flex h-full min-h-0 flex-row gap-4"
+    : "flex h-full min-h-0 flex-col gap-3";
+  const canvasWrapCls = sideBar
+    ? "flex min-h-0 min-w-0 flex-1 items-center justify-center"
+    : "contents";
+  const canvasCls = sideBar
+    ? "mx-auto aspect-4/3 max-h-full max-w-full rounded-2xl"
+    : "mx-auto min-h-0 aspect-4/3 w-full max-h-full rounded-2xl landscape:h-full landscape:w-auto landscape:max-w-full";
+  const barCls = sideBar
+    ? "flex w-fit shrink-0 flex-col items-stretch justify-center gap-3"
+    : "mx-auto flex w-fit max-w-full shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3";
+  // In the side-column (short) layout, scale the tool controls down so the bar
+  // stays compact and hands more room to the canvas. The descendant variants only
+  // reach the tool buttons/icons here — the popovers render through a portal to
+  // <body>, and Lock-in is a sibling, so neither is affected.
+  const toolsCls = sideBar
+    ? "flex flex-wrap items-center justify-center gap-1.5 [&_button]:h-8 [&_button]:w-8 [&_button]:rounded-md [&_button>span]:h-4 [&_button>span]:w-4 [&_svg]:h-4 [&_svg]:w-4"
+    : "flex flex-wrap items-center justify-center gap-2";
+
   return (
-    // One centered column at every size. The canvas is a direct flex child so its
-    // fixed-aspect (4:3) box keeps measuring against the real available height
-    // (after the header) — width-driven in portrait, height-driven in landscape,
-    // never overflowing a short screen. Two equal flex-1 spacers above and below
-    // center the canvas + bar cluster: when the canvas is shorter than the space
-    // (width-limited), the slack splits evenly top and bottom; when it fills the
-    // height (landscape), the spacers collapse to zero. The bar hugs right under
-    // the canvas.
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="min-h-0 flex-1" aria-hidden />
-      <EffectLayer
-        effects={effects}
-        className="mx-auto min-h-0 aspect-4/3 w-full max-h-full rounded-2xl landscape:h-full landscape:w-auto landscape:max-w-full"
-      >
-        <canvas
-          ref={ref}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          onPointerDown={start}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerLeave={end}
-          onPointerCancel={end}
-          className={`h-full w-full touch-none select-none rounded-2xl border-2 border-border bg-surface ${
-            inputDisabled ? "opacity-70" : "cursor-crosshair"
-          }`}
-        />
-      </EffectLayer>
+    <div className={rootCls}>
+      {!sideBar && <div className="min-h-0 flex-1" aria-hidden />}
+      <div className={canvasWrapCls}>
+        <EffectLayer effects={effects} className={canvasCls}>
+          <canvas
+            ref={ref}
+            width={CANVAS_W}
+            height={CANVAS_H}
+            onPointerDown={start}
+            onPointerMove={move}
+            onPointerUp={end}
+            onPointerLeave={end}
+            onPointerCancel={end}
+            className={`h-full w-full touch-none select-none rounded-2xl border-2 border-border bg-surface ${
+              inputDisabled ? "opacity-70" : "cursor-crosshair"
+            }`}
+          />
+        </EffectLayer>
+      </div>
 
       {!disabled && (
-        <div className="mx-auto flex w-fit max-w-full shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
+        <div className={barCls}>
           {/* One bottom action bar at every size: the tool cluster and the Lock-in
               sit together, centered — tools then button, close, not flung to
               opposite edges. The bar is w-fit (shrink-wrapped to its widest child,
@@ -369,7 +399,7 @@ export function DrawingCanvas({
               that same width, so it's never wider than the toolbar nor a tiny pill.
               shrink-0 keeps it pinned while the canvas above flexes; Lock-in is
               never pushed below the fold. Every control is a fixed 40px square. */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className={toolsCls}>
             {/* Color — a swatch that opens a popover of presets plus a custom
                 picker, so common colors are one tap but anything is reachable. */}
             <div className="relative shrink-0" ref={colorRef}>
@@ -523,10 +553,20 @@ export function DrawingCanvas({
             </ToolButton>
           </div>
 
-          {footer && <div className="sm:shrink-0">{footer}</div>}
+          {footer && (
+            <div
+              className={
+                sideBar
+                  ? "flex justify-center [&>button]:h-9 [&>button]:px-4 [&>button]:text-sm"
+                  : "sm:shrink-0"
+              }
+            >
+              {footer}
+            </div>
+          )}
         </div>
       )}
-      <div className="min-h-0 flex-1" aria-hidden />
+      {!sideBar && <div className="min-h-0 flex-1" aria-hidden />}
     </div>
   );
 }
