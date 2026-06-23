@@ -14,21 +14,21 @@ type CmdKind int
 const (
 	CmdJoin CmdKind = iota
 	CmdDisconnect
-	CmdLeave         // player: leave the room now (immediate removal, no grace)
-	CmdConfigure     // host: set rounds/categories/language/timers (lobby only)
-	CmdStart         // host: lobby → drawing (requires minPlayers)
-	CmdSubmitDrawing // player: lock in strokes during the drawing phase
-	CmdDraftAppend   // player: append in-progress strokes (silent: no broadcast/persist)
-	CmdDraftReplace  // player: replace in-progress strokes (undo/clear; silent)
+	CmdLeave           // player: leave the room now (immediate removal, no grace)
+	CmdConfigure       // host: set rounds/categories/language/timers (lobby only)
+	CmdStart           // host: lobby → drawing (requires minPlayers)
+	CmdSubmitDrawing   // player: lock in strokes during the drawing phase
+	CmdDraftAppend     // player: append in-progress strokes (silent: no broadcast/persist)
+	CmdDraftReplace    // player: replace in-progress strokes (undo/clear; silent)
 	cmdTestReadDrawing // test-only: synchronously read a player's stored draft via probe
-	CmdSubmitGuess   // player: guess the artist during the guessing phase
-	CmdNextPhase     // host: reveal → next round / ended
-	CmdReturnToLobby // host: ended → lobby (play again, keep players)
-	CmdAdvance       // internal, timer-driven phase advance
+	CmdSubmitGuess     // player: guess the artist during the guessing phase
+	CmdNextPhase       // host: reveal → next round / ended
+	CmdReturnToLobby   // host: ended → lobby (play again, keep players)
+	CmdAdvance         // internal, timer-driven phase advance
 	CmdPrune
 	CmdReapIfEmpty
-	CmdHostPrune   // internal: host display gone past grace → reap
-	CmdEffectWave  // internal: periodic frenzy effect wave (hits the whole room)
+	CmdHostPrune  // internal: host display gone past grace → reap
+	CmdEffectWave // internal: periodic frenzy effect wave (hits the whole room)
 )
 
 // Tunables.
@@ -54,14 +54,16 @@ const (
 	// guessesForPlayers). At maxPlayers this is the value the scale already lands on.
 	maxFeatures = 5
 
-	// Frenzy effect-wave cadence. While drawing or guessing, the room is hit by a
-	// wave that inflicts one random effect on every active player at once: the
-	// first wave lands firstEffectDelay into the phase, then every effectInterval
-	// after. Each effect lasts effectDurationMs — shorter than the interval, so
-	// waves never overlap and there's clear play between them.
-	firstEffectDelay = 5 * time.Second
-	effectInterval   = 15 * time.Second
-	effectDurationMs = 7000
+	// Frenzy escalating cadence (fractions of the phase, floored for short
+	// phases). The first wave lands firstWaveFrac in; the gap to each next wave
+	// tightens from gapStartFrac toward gapEndFrac as the buzzer nears; each effect
+	// lasts durationOfGap of the current gap, so late waves run near-continuous.
+	firstWaveFrac = 0.12
+	gapStartFrac  = 0.28
+	gapEndFrac    = 0.10
+	durationOfGap = 0.9
+	minWaveGap    = 4 * time.Second
+	minEffectDur  = 2500 * time.Millisecond // floor on a wave effect's lifetime
 
 	// Round configuration bounds and defaults.
 	DefaultRounds  = 3
@@ -131,10 +133,10 @@ type Command struct {
 	Gen       int            // prune/advance: generation captured when the timer was armed
 
 	// Game payloads.
-	Strokes   []Stroke // submitDrawing
-	Guess     string   // submitGuess: the guessed artist's name
-	GuessID   string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
-	Config    *Config  // configure
+	Strokes []Stroke // submitDrawing
+	Guess   string   // submitGuess: the guessed artist's name
+	GuessID string   // submitGuess (flipped): the chosen drawing id, resolved server-side to its owner
+	Config  *Config  // configure
 
 	// probe is a test-only channel used by cmdTestReadDrawing to synchronously
 	// return a copy of a player's stored draft strokes. Always nil in production.
@@ -329,6 +331,61 @@ func (r *Room) armWave(gen int, d time.Duration) {
 	})
 }
 
+// phaseDurationMs is the configured length of the current timed play phase, or 0
+// outside drawing/guessing.
+func (r *Room) phaseDurationMs() int {
+	switch r.state.Phase {
+	case PhaseDrawing:
+		return r.state.DrawMs
+	case PhaseGuessing:
+		return r.state.GuessMs
+	default:
+		return 0
+	}
+}
+
+// phaseProgress is how far (0..1) the current timed play phase has elapsed, from
+// PhaseEndsAt and the phase's configured duration. 0 outside drawing/guessing.
+func (r *Room) phaseProgress() float64 {
+	dur := r.phaseDurationMs()
+	if dur <= 0 {
+		return 0
+	}
+	remaining := r.state.PhaseEndsAt - time.Now().UnixMilli()
+	return clampF(1-float64(remaining)/float64(dur), 0, 1)
+}
+
+// firstWaveDelay is when a phase's first wave lands: firstWaveFrac of the phase,
+// floored at minWaveGap.
+func firstWaveDelay(durMs int) time.Duration {
+	d := time.Duration(firstWaveFrac*float64(durMs)) * time.Millisecond
+	if d < minWaveGap {
+		d = minWaveGap
+	}
+	return d
+}
+
+// waveGap is the delay to the next wave at phase progress p: it tightens from
+// gapStartFrac to gapEndFrac of the phase as p→1, floored at minWaveGap.
+func waveGap(progress float64, durMs int) time.Duration {
+	frac := gapStartFrac + (gapEndFrac-gapStartFrac)*clampF(progress, 0, 1)
+	gap := time.Duration(frac*float64(durMs)) * time.Millisecond
+	if gap < minWaveGap {
+		gap = minWaveGap
+	}
+	return gap
+}
+
+// waveEffectDuration is how long a wave's effect lasts — durationOfGap of the
+// current gap so late waves run near-continuous — floored at minEffectDur.
+func waveEffectDuration(gap time.Duration) time.Duration {
+	d := time.Duration(float64(gap) * durationOfGap)
+	if d < minEffectDur {
+		d = minEffectDur
+	}
+	return d
+}
+
 func (r *Room) isDone() bool {
 	select {
 	case <-r.done:
@@ -395,8 +452,10 @@ func (r *Room) handle(c Command) bool {
 		}
 	case CmdEffectWave:
 		if c.Gen == r.phaseGen {
-			r.applyEffectWave(r.state.Phase)
-			r.armWave(r.phaseGen, effectInterval)
+			progress := r.phaseProgress()
+			gap := waveGap(progress, r.phaseDurationMs())
+			r.applyEffectWave(r.state.Phase, progress, waveEffectDuration(gap))
+			r.armWave(r.phaseGen, gap)
 		}
 	case cmdTestReadDrawing:
 		if c.probe != nil {

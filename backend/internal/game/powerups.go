@@ -7,7 +7,7 @@ import (
 
 // Powerup is a Frenzy sabotage effect. Each belongs to a phase and is only rolled
 // during that phase. Every effect is view-only or a brief input lock — it never
-// touches stroke data — and self-expires after effectDurationMs.
+// touches stroke data — and self-expires when its wave-stamped EndsAt passes.
 type Powerup string
 
 const (
@@ -24,50 +24,110 @@ const (
 	PowerHideNames Powerup = "hidenames" // mask the guess options' names + avatars
 )
 
-// Per-phase effect pools (deterministic order, unlike map iteration) the wave
-// ticker draws from when rolling each player's effect.
-var (
-	drawPowerups  = []Powerup{PowerFog, PowerLights, PowerFlip, PowerCramp}
-	guessPowerups = []Powerup{PowerSquint, PowerCurtain, PowerShuffle, PowerHideNames}
+// tier is an effect's severity. Waves draw from harsher tiers as a phase elapses,
+// so the room's sabotage escalates toward the buzzer.
+type tier int
+
+const (
+	tierMild tier = iota
+	tierMedium
+	tierHarsh
 )
 
-// powerupsForPhase lists the effects that can be rolled in a phase.
-func powerupsForPhase(p Phase) []Powerup {
+// Per-phase severity tiers. Severity comes from which effect fires (and, via the
+// cadence, how often) — each effect keeps its own single intensity, so the binary
+// effects (flip/cramp/shuffle/hidenames) simply sit at the right tier.
+var (
+	drawTiers = [3][]Powerup{
+		tierMild:   {PowerFog},
+		tierMedium: {PowerFlip},
+		tierHarsh:  {PowerLights, PowerCramp},
+	}
+	guessTiers = [3][]Powerup{
+		tierMild:   {PowerSquint, PowerHideNames},
+		tierMedium: {PowerShuffle},
+		tierHarsh:  {PowerCurtain},
+	}
+)
+
+// tiersForPhase returns the phase's severity table; ok is false for phases with no
+// effects (reveal/lobby/ended).
+func tiersForPhase(p Phase) ([3][]Powerup, bool) {
 	switch p {
 	case PhaseDrawing:
-		return drawPowerups
+		return drawTiers, true
 	case PhaseGuessing:
-		return guessPowerups
+		return guessTiers, true
 	default:
-		return nil
+		return [3][]Powerup{}, false
 	}
 }
 
-// applyEffectWave inflicts one random effect on every connected, affectable
-// player at once — the whole room is sabotaged on the same beat. Each player
-// rolls their own effect (they don't all get the same one), every effect starts
-// now and lasts effectDurationMs. A no-op when the phase has no pool. The wave
-// replaces any prior effects (the previous wave's are already expired — see
-// effectInterval vs effectDurationMs), so there is no stacking.
-func (r *Room) applyEffectWave(phase Phase) {
-	pool := powerupsForPhase(phase)
+// powerupsForPhase is the full set of effects a phase can roll — the union of its
+// tiers. Nil for non-play phases.
+func powerupsForPhase(p Phase) []Powerup {
+	tiers, ok := tiersForPhase(p)
+	if !ok {
+		return nil
+	}
+	var all []Powerup
+	for _, t := range tiers {
+		all = append(all, t...)
+	}
+	return all
+}
+
+// tierForProgress picks the severity tier for a wave firing at phase progress p
+// (0 = phase start, 1 = buzzer). Mild early, harsh near the end.
+func tierForProgress(p float64) tier {
+	switch {
+	case p < 0.45:
+		return tierMild
+	case p < 0.80:
+		return tierMedium
+	default:
+		return tierHarsh
+	}
+}
+
+// effectForWave rolls one effect for a wave: the tier is chosen by progress, then a
+// random effect from that tier. ok is false for phases with no tiers.
+func effectForWave(phase Phase, progress float64) (Powerup, bool) {
+	tiers, ok := tiersForPhase(phase)
+	if !ok {
+		return "", false
+	}
+	pool := tiers[tierForProgress(progress)]
 	if len(pool) == 0 {
+		return "", false
+	}
+	return pool[rand.IntN(len(pool))], true
+}
+
+// applyEffectWave inflicts ONE shared, tier-selected effect on every connected,
+// affectable player at once — the whole room eats the same handicap on the same
+// beat. The effect's severity comes from progress (mild early, harsh near the
+// buzzer); it lasts dur and replaces any prior effects. A no-op when the phase has
+// no tiers or no one is affectable.
+func (r *Room) applyEffectWave(phase Phase, progress float64, dur time.Duration) {
+	kind, ok := effectForWave(phase, progress)
+	if !ok {
 		return
 	}
-	endsAt := time.Now().Add(effectDurationMs * time.Millisecond).UnixMilli()
+	endsAt := time.Now().Add(dur).UnixMilli()
 	next := map[string][]ActiveEffect{}
 	for _, p := range r.state.Players {
 		pr, ok := r.present[p.Name]
 		if !ok || !pr.connected {
 			continue
 		}
+		// affectable already exempts locked-in drawers / the featured artist /
+		// already-guessed players — this exemption IS the early-lock grace: commit
+		// early and the escalating waves never reach you.
 		if !r.affectable(p.Name) {
 			continue
 		}
-		next[p.Name] = []ActiveEffect{{
-			Kind:   pool[rand.IntN(len(pool))],
-			EndsAt: endsAt,
-		}}
+		next[p.Name] = []ActiveEffect{{Kind: kind, EndsAt: endsAt}}
 	}
 	if len(next) == 0 {
 		return

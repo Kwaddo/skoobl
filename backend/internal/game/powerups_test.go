@@ -58,33 +58,42 @@ func frenzyGuessing(t *testing.T, names ...string) *Room {
 	return r
 }
 
-func TestWaveHitsEveryActivePlayerAtOnce(t *testing.T) {
+func TestWaveAppliesOneSharedEffectToEveryActivePlayer(t *testing.T) {
 	names := []string{"alice", "bob", "carol", "dave"}
 	r := syncRoom(t, names...)
 	r.state.Mode = ModeFrenzy
 	r.state.Phase = PhaseDrawing
 
 	before := time.Now().UnixMilli()
-	r.applyEffectWave(PhaseDrawing)
+	dur := 6 * time.Second
+	// Harsh progress (0.9) draws from a 2-effect tier, so a shared single roll is
+	// observable: every player must get the SAME kind, not an independent roll.
+	r.applyEffectWave(PhaseDrawing, 0.9, dur)
 
 	if len(r.state.Effects) != len(names) {
 		t.Fatalf("wave hit %d players, want all %d", len(r.state.Effects), len(names))
 	}
+	var kind Powerup
 	var endsAt int64
 	for _, n := range names {
 		effs := r.state.Effects[n]
 		if len(effs) != 1 {
 			t.Fatalf("%s has %d effects, want exactly one per wave", n, len(effs))
 		}
-		if !inPool(effs[0].Kind, drawPowerups) {
+		if !inPool(effs[0].Kind, powerupsForPhase(PhaseDrawing)) {
 			t.Fatalf("%s got %q, not a draw-phase effect", n, effs[0].Kind)
 		}
-		if effs[0].EndsAt < before+effectDurationMs {
+		if effs[0].EndsAt < before+dur.Milliseconds() {
 			t.Fatalf("%s effect expires too soon: %d", n, effs[0].EndsAt)
 		}
-		if endsAt == 0 {
-			endsAt = effs[0].EndsAt
-		} else if effs[0].EndsAt != endsAt {
+		if kind == "" {
+			kind, endsAt = effs[0].Kind, effs[0].EndsAt
+			continue
+		}
+		if effs[0].Kind != kind {
+			t.Fatal("a wave is one shared effect — every player must get the same kind")
+		}
+		if effs[0].EndsAt != endsAt {
 			t.Fatal("a wave must stamp every player with the same expiry — they're hit at once")
 		}
 	}
@@ -94,14 +103,14 @@ func TestWaveRollsPhaseAppropriateEffects(t *testing.T) {
 	names := []string{"alice", "bob", "carol", "dave"}
 	r := frenzyGuessing(t, names...)
 
-	r.applyEffectWave(PhaseGuessing)
+	r.applyEffectWave(PhaseGuessing, 0.0, 6*time.Second)
 
 	if len(r.state.Effects) == 0 {
 		t.Fatal("a guessing-phase wave should hit the active guessers")
 	}
 	for n, effs := range r.state.Effects {
 		for _, e := range effs {
-			if !inPool(e.Kind, guessPowerups) {
+			if !inPool(e.Kind, powerupsForPhase(PhaseGuessing)) {
 				t.Fatalf("%s got %q during guessing, not a guess-phase effect", n, e.Kind)
 			}
 		}
@@ -115,7 +124,7 @@ func TestWaveSkipsLockedDrawers(t *testing.T) {
 	r.state.Phase = PhaseDrawing
 	r.state.Locked = map[string]bool{"bob": true, "carol": true} // only alice + dave still drawing
 
-	r.applyEffectWave(PhaseDrawing)
+	r.applyEffectWave(PhaseDrawing, 0.0, 6*time.Second)
 
 	if _, ok := r.state.Effects["bob"]; ok {
 		t.Fatal("a locked-in drawer is done — must not be hit")
@@ -136,7 +145,7 @@ func TestWaveSkipsFeaturedAndGuessed(t *testing.T) {
 	r.state.Featured = "carol"
 	r.state.Guesses = map[string]string{"bob": "x"}
 
-	r.applyEffectWave(PhaseGuessing)
+	r.applyEffectWave(PhaseGuessing, 0.0, 6*time.Second)
 
 	if _, ok := r.state.Effects["carol"]; ok {
 		t.Fatal("the featured artist doesn't guess — must not be hit")
@@ -155,8 +164,8 @@ func TestWaveReplacesPriorEffects(t *testing.T) {
 	r.state.Mode = ModeFrenzy
 	r.state.Phase = PhaseDrawing
 
-	r.applyEffectWave(PhaseDrawing)
-	r.applyEffectWave(PhaseDrawing)
+	r.applyEffectWave(PhaseDrawing, 0.0, 6*time.Second)
+	r.applyEffectWave(PhaseDrawing, 0.0, 6*time.Second)
 
 	for n, effs := range r.state.Effects {
 		if len(effs) != 1 {
@@ -170,7 +179,7 @@ func TestWaveNoOpOutsidePlayPhases(t *testing.T) {
 	r.state.Mode = ModeFrenzy
 	r.state.Phase = PhaseReveal
 
-	r.applyEffectWave(PhaseReveal)
+	r.applyEffectWave(PhaseReveal, 0.5, 6*time.Second)
 
 	if len(r.state.Effects) != 0 {
 		t.Fatalf("reveal has no effect pool — wave must be a no-op, got %+v", r.state.Effects)
@@ -237,5 +246,73 @@ func TestViewRedactsEffects(t *testing.T) {
 	// No cross-leak: a client view never carries the authoritative Effects map.
 	if av.Effects != nil {
 		t.Fatal("authoritative Effects must not appear in a client view")
+	}
+}
+
+func TestWaveEscalatesWithProgress(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave"}
+
+	early := syncRoom(t, names...)
+	early.state.Mode = ModeFrenzy
+	early.state.Phase = PhaseDrawing
+	early.applyEffectWave(PhaseDrawing, 0.0, 6*time.Second) // mild tier
+	for n, effs := range early.state.Effects {
+		if !inPool(effs[0].Kind, drawTiers[tierMild]) {
+			t.Fatalf("%s early wave = %q, want a mild draw effect", n, effs[0].Kind)
+		}
+	}
+
+	late := syncRoom(t, names...)
+	late.state.Mode = ModeFrenzy
+	late.state.Phase = PhaseDrawing
+	late.applyEffectWave(PhaseDrawing, 0.9, 6*time.Second) // harsh tier
+	for n, effs := range late.state.Effects {
+		if !inPool(effs[0].Kind, drawTiers[tierHarsh]) {
+			t.Fatalf("%s late wave = %q, want a harsh draw effect", n, effs[0].Kind)
+		}
+	}
+}
+
+func TestTierForProgress(t *testing.T) {
+	cases := []struct {
+		p    float64
+		want tier
+	}{
+		{-0.1, tierMild}, {0.0, tierMild}, {0.44, tierMild},
+		{0.45, tierMedium}, {0.79, tierMedium},
+		{0.80, tierHarsh}, {1.0, tierHarsh}, {1.5, tierHarsh},
+	}
+	for _, c := range cases {
+		if got := tierForProgress(c.p); got != c.want {
+			t.Errorf("tierForProgress(%v) = %d, want %d", c.p, got, c.want)
+		}
+	}
+}
+
+func TestEffectForWaveStaysInPhaseAndTier(t *testing.T) {
+	// Early (mild) draw wave: only fog.
+	if e, ok := effectForWave(PhaseDrawing, 0.0); !ok || e != PowerFog {
+		t.Fatalf("early draw wave = (%q,%v), want (fog,true)", e, ok)
+	}
+	// Late (harsh) draw wave: lights or cramp.
+	e, ok := effectForWave(PhaseDrawing, 0.9)
+	if !ok || (e != PowerLights && e != PowerCramp) {
+		t.Fatalf("late draw wave = (%q,%v), want a harsh draw effect", e, ok)
+	}
+	// Late (harsh) guess wave: curtain.
+	if e, ok := effectForWave(PhaseGuessing, 0.9); !ok || e != PowerCurtain {
+		t.Fatalf("late guess wave = (%q,%v), want (curtain,true)", e, ok)
+	}
+	// Mid (medium) draw wave: only flip.
+	if e, ok := effectForWave(PhaseDrawing, 0.5); !ok || e != PowerFlip {
+		t.Fatalf("medium draw wave = (%q,%v), want (flip,true)", e, ok)
+	}
+	// Mid (medium) guess wave: only shuffle.
+	if e, ok := effectForWave(PhaseGuessing, 0.5); !ok || e != PowerShuffle {
+		t.Fatalf("medium guess wave = (%q,%v), want (shuffle,true)", e, ok)
+	}
+	// Non-play phase: no effect.
+	if _, ok := effectForWave(PhaseReveal, 0.5); ok {
+		t.Fatal("reveal has no tiers — effectForWave must report ok=false")
 	}
 }
