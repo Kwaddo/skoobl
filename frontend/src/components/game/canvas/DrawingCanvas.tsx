@@ -350,10 +350,10 @@ export function DrawingCanvas({
   // so it fills the height and fits the leftover width, and the bar moves to a
   // side column on the right — no vertical space wasted on a bottom bar.
   const rootCls = sideBar
-    ? "flex h-full min-h-0 flex-row gap-4"
+    ? "flex h-full min-h-0 flex-row justify-center gap-4"
     : "flex h-full min-h-0 flex-col gap-3";
   const canvasWrapCls = sideBar
-    ? "flex min-h-0 min-w-0 flex-1 items-center justify-center"
+    ? "flex min-h-0 items-center justify-center"
     : "contents";
   const canvasCls = sideBar
     ? "mx-auto aspect-4/3 max-h-full max-w-full rounded-2xl"
@@ -361,12 +361,13 @@ export function DrawingCanvas({
   const barCls = sideBar
     ? "flex w-fit shrink-0 flex-col items-stretch justify-center gap-3"
     : "mx-auto flex w-fit max-w-full shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3";
-  // In the side-column (short) layout, scale the tool controls down so the bar
-  // stays compact and hands more room to the canvas. The descendant variants only
-  // reach the tool buttons/icons here — the popovers render through a portal to
-  // <body>, and Lock-in is a sibling, so neither is affected.
+  // In the side-column (short) layout, lay the six tools out as a 3×2 grid (three
+  // per row) with a roomier gap, and scale the controls down so the bar stays
+  // compact and hands more room to the canvas. The descendant variants only reach
+  // the tool buttons/icons here — the popovers render through a portal to <body>,
+  // and Lock-in is a sibling, so neither is affected.
   const toolsCls = sideBar
-    ? "flex flex-wrap items-center justify-center gap-1.5 [&_button]:h-8 [&_button]:w-8 [&_button]:rounded-md [&_button>span]:h-4 [&_button>span]:w-4 [&_svg]:h-4 [&_svg]:w-4"
+    ? "grid grid-cols-3 place-items-center gap-3 [&_button]:h-8 [&_button]:w-8 [&_button]:rounded-md [&_button>span]:h-4 [&_button>span]:w-4 [&_svg]:h-4 [&_svg]:w-4"
     : "flex flex-wrap items-center justify-center gap-2";
 
   return (
