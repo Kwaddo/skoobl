@@ -21,6 +21,17 @@ import type { Point, Powerup, Stroke } from "@/lib/protocol";
 import { EffectLayer } from "../display/EffectLayer";
 import { Brush, Bucket, Pipette, Trash, Undo } from "../icons";
 
+// Total points we keep locally, mirroring the backend cap (room.go maxPointsTotal)
+// so what's drawn is exactly what the server accepts — and, crucially, so a
+// non-stop scribble can't grow the canvas without bound and kill the tab.
+const MAX_POINTS_TOTAL = 40_000;
+// A single live stroke is split into a fresh continuing segment past this many
+// points. Repainting the in-progress stroke is O(its length) every frame, so an
+// unbounded stroke degrades to O(n²) and eventually freezes; baking each segment
+// into the baseline keeps every frame cheap. Well under the backend's 3000/stroke
+// cap, and high enough that ordinary strokes never split.
+const SEGMENT_POINTS = 1_000;
+
 // DrawingCanvas is the interactive drawing surface plus its toolbar (color
 // picker, pen/fill/eyedropper tools, brush sizes, undo, clear). It owns the strokes in a
 // ref and reports them up via onChange / onDraftAppend / onDraftReplace so the
@@ -79,12 +90,9 @@ export function DrawingCanvas({
   const destructiveRef = useRef(false);
   const flushTimerRef = useRef<number | null>(null);
   const pendingRef = useRef(false);
-  // True once the active stroke has moved: while a stroke is being drawn we can't
-  // append it (it's still growing — an append would freeze it at its current
-  // points and later additions would be lost or duplicated), so a live stroke is
-  // synced with a full replace instead. A pure tap never moves, so it still uses
-  // the cheap append path.
-  const liveRef = useRef(false);
+  // Running total of points across all strokes, so the per-move cap check is O(1)
+  // (no scanning the whole strokes array each pointer event).
+  const pointCountRef = useRef(0);
 
   const crampLocked = effects.has("cramp");
   const inputDisabled = disabled || crampLocked;
@@ -202,12 +210,20 @@ export function DrawingCanvas({
     };
   }, [redrawAll]);
 
-  // doFlush emits one draft delta: a full replace after a destructive edit or
-  // while a stroke is being drawn live (its last stroke is still growing), else
-  // the completed strokes appended since the last sync.
+  // doFlush emits one draft delta: a full replace after a destructive edit
+  // (undo/clear removes strokes, which append can't express), else the COMPLETED
+  // strokes appended since the last sync. We only ever flush on a completed change
+  // (stroke end / fill / undo / clear), never mid-stroke, so the in-progress
+  // stroke is always whole here — no live full-replace. That's the optimization:
+  // the old per-frame replace re-serialized the entire (growing) strokes array
+  // every ~120ms, so a long drawing got progressively laggier; appending only the
+  // newly-finished strokes keeps each sync O(new), flat no matter how much is on
+  // the canvas. The tradeoff is that a hard disconnect mid-stroke loses only that
+  // one unfinished stroke (every completed stroke is already synced, and the
+  // buzzer auto-submit reads the full local strokes via onChange regardless).
   const doFlush = useCallback(() => {
     const strokes = strokesRef.current;
-    if (destructiveRef.current || liveRef.current) {
+    if (destructiveRef.current) {
       destructiveRef.current = false;
       syncedRef.current = strokes.length;
       onDraftReplace?.(strokes);
@@ -218,9 +234,9 @@ export function DrawingCanvas({
     }
   }, [onDraftAppend, onDraftReplace]);
 
-  // scheduleFlush throttles draft emits to ~120ms, coalescing bursts (rapid points
-  // mid-stroke, or rapid taps) into a single trailing delta. Destructive changes
-  // (undo/clear) bypass throttling and flush immediately.
+  // scheduleFlush throttles draft emits to ~120ms, coalescing bursts of rapid
+  // taps into a single trailing delta. Destructive changes (undo/clear) bypass
+  // throttling and flush immediately.
   const scheduleFlush = useCallback(() => {
     if (destructiveRef.current) {
       // Cancel any pending throttle and flush now so the replace fires immediately.
@@ -288,37 +304,51 @@ export function DrawingCanvas({
         ...strokesRef.current,
         { color, width, points: [p], fill: true },
       ];
+      pointCountRef.current += 1;
       redrawAll(); // a fill must replay to flood under existing pixels
       commit();
       return;
     }
     e.currentTarget.setPointerCapture?.(e.pointerId);
     drawingRef.current = true;
-    liveRef.current = false; // a fresh stroke; stays a tap until it moves
     // Freeze the committed picture, then start the new stroke over that baseline.
     snapshotCommitted();
     strokesRef.current = [...strokesRef.current, { color, width, points: [p] }];
+    pointCountRef.current += 1;
     paintLive(); // paints the initial dot
   };
 
   const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (inputDisabled || !drawingRef.current || !e.isPrimary) return;
-    const cur = strokesRef.current[strokesRef.current.length - 1];
+    let cur = strokesRef.current[strokesRef.current.length - 1];
     if (!cur) return;
     const native = e.nativeEvent as globalThis.PointerEvent;
     // Coalesced events recover the high-frequency samples the OS batched into this
     // frame's single move — drawing them all keeps fast strokes smooth, not jagged.
     const coalesced = native.getCoalescedEvents?.() ?? [native];
     for (const ev of coalesced) {
+      if (pointCountRef.current >= MAX_POINTS_TOTAL) break; // canvas full — stop
       cur.points.push(toCanvas(ev.clientX, ev.clientY));
+      pointCountRef.current += 1;
+      // A long, non-stop stroke gets baked into the baseline and continued as a
+      // fresh segment, so the per-frame "repaint the live stroke" cost stays
+      // bounded (an unbounded stroke would grow O(n²) and crash the tab). The
+      // carried-over last point keeps the seam visually continuous.
+      if (cur.points.length >= SEGMENT_POINTS) {
+        paintLive(); // make sure the visible canvas holds the whole segment…
+        snapshotCommitted(); // …then fold it into the baseline buffer
+        const seam = cur.points[cur.points.length - 1];
+        cur = { color: cur.color, width: cur.width, points: [seam] };
+        strokesRef.current = [...strokesRef.current, cur];
+        pointCountRef.current += 1; // the duplicated seam point
+      }
     }
     paintLive();
-    // Mark the stroke live and sync it: onChange keeps the parent's copy current
-    // (so an auto-submit at the buzzer captures the in-progress stroke), and the
-    // throttled flush streams the draft for resilience if the drawer drops off.
-    liveRef.current = true;
+    // Keep the parent's copy current so an auto-submit at the buzzer captures the
+    // in-progress stroke. This is a cheap ref assignment — no draft flush here:
+    // the completed stroke is synced on pointer-up (see doFlush), so the hot
+    // pointer path never serializes the whole strokes array.
     onChange?.(strokesRef.current);
-    scheduleFlush();
   };
 
   const end = () => {
@@ -330,6 +360,8 @@ export function DrawingCanvas({
 
   const undo = () => {
     if (strokesRef.current.length === 0) return;
+    const removed = strokesRef.current[strokesRef.current.length - 1];
+    pointCountRef.current -= removed?.points?.length ?? 0;
     strokesRef.current = strokesRef.current.slice(0, -1);
     destructiveRef.current = true;
     redrawAll();
@@ -339,6 +371,7 @@ export function DrawingCanvas({
   const clear = () => {
     if (strokesRef.current.length === 0) return;
     strokesRef.current = [];
+    pointCountRef.current = 0;
     destructiveRef.current = true;
     redrawAll();
     commit();

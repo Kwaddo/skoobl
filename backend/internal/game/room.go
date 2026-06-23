@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -28,7 +29,7 @@ const (
 	CmdPrune
 	CmdReapIfEmpty
 	CmdHostPrune  // internal: host display gone past grace → reap
-	CmdEffectWave // internal: periodic frenzy effect wave (hits the whole room)
+	CmdEffectWave // internal: periodic frenzy wave; rolls an effect per player
 )
 
 // Tunables.
@@ -54,16 +55,21 @@ const (
 	// guessesForPlayers). At maxPlayers this is the value the scale already lands on.
 	maxFeatures = 5
 
-	// Frenzy escalating cadence (fractions of the phase, floored for short
-	// phases). The first wave lands firstWaveFrac in; the gap to each next wave
-	// tightens from gapStartFrac toward gapEndFrac as the buzzer nears; each effect
-	// lasts durationOfGap of the current gap, so late waves run near-continuous.
-	firstWaveFrac = 0.12
-	gapStartFrac  = 0.28
-	gapEndFrac    = 0.10
-	durationOfGap = 0.9
-	minWaveGap    = 4 * time.Second
-	minEffectDur  = 2500 * time.Millisecond // floor on a wave effect's lifetime
+	// Frenzy escalating cadence. The gap is a fraction of the phase that tightens
+	// from gapStartFrac toward gapEndFrac as the buzzer nears, then jittered
+	// ±waveJitterFrac so waves never fall on a predictable metronome. Crucially the
+	// first wave and the gaps are clamped to ABSOLUTE bounds (maxFirstWave /
+	// maxWaveGap), so a long drawing phase stays as lively as a short one instead
+	// of scaling up into long dead stretches — the fractions only stretch the gaps
+	// on short phases, never past the caps on long ones. Per-player effect
+	// lifetimes are rolled in applyEffectWave (see effectLifetime), not from the gap.
+	firstWaveFrac  = 0.06
+	gapStartFrac   = 0.17
+	gapEndFrac     = 0.06
+	waveJitterFrac = 0.45
+	minWaveGap     = 2500 * time.Millisecond
+	maxFirstWave   = 5 * time.Second // chaos always starts within this, even on a long phase
+	maxWaveGap     = 8 * time.Second // no gap ever exceeds this, even on a long phase
 
 	// Round configuration bounds and defaults.
 	DefaultRounds  = 3
@@ -356,34 +362,46 @@ func (r *Room) phaseProgress() float64 {
 }
 
 // firstWaveDelay is when a phase's first wave lands: firstWaveFrac of the phase,
-// floored at minWaveGap.
+// floored at minWaveGap and capped at maxFirstWave so even a long phase opens
+// with chaos quickly (no long effect-free intro).
 func firstWaveDelay(durMs int) time.Duration {
 	d := time.Duration(firstWaveFrac*float64(durMs)) * time.Millisecond
 	if d < minWaveGap {
 		d = minWaveGap
 	}
+	if d > maxFirstWave {
+		d = maxFirstWave
+	}
 	return d
 }
 
-// waveGap is the delay to the next wave at phase progress p: it tightens from
-// gapStartFrac to gapEndFrac of the phase as p→1, floored at minWaveGap.
+// waveGap is the smooth (un-jittered) baseline delay to the next wave at phase
+// progress p: it tightens from gapStartFrac to gapEndFrac of the phase as p→1,
+// floored at minWaveGap and capped at maxWaveGap so long phases don't drift into
+// slow, sparse waves. nextWaveGap jitters this for the live schedule.
 func waveGap(progress float64, durMs int) time.Duration {
 	frac := gapStartFrac + (gapEndFrac-gapStartFrac)*clampF(progress, 0, 1)
 	gap := time.Duration(frac*float64(durMs)) * time.Millisecond
 	if gap < minWaveGap {
 		gap = minWaveGap
 	}
+	if gap > maxWaveGap {
+		gap = maxWaveGap
+	}
 	return gap
 }
 
-// waveEffectDuration is how long a wave's effect lasts — durationOfGap of the
-// current gap so late waves run near-continuous — floored at minEffectDur.
-func waveEffectDuration(gap time.Duration) time.Duration {
-	d := time.Duration(float64(gap) * durationOfGap)
-	if d < minEffectDur {
-		d = minEffectDur
+// nextWaveGap is the live delay to the next wave: the waveGap baseline scattered
+// by ±waveJitterFrac so waves never land on a metronome — you can't count the
+// beat and brace for the next hit. Floored at minWaveGap.
+func nextWaveGap(progress float64, durMs int) time.Duration {
+	base := waveGap(progress, durMs)
+	span := float64(base) * waveJitterFrac
+	gap := time.Duration(float64(base) + (rand.Float64()*2-1)*span)
+	if gap < minWaveGap {
+		gap = minWaveGap
 	}
-	return d
+	return gap
 }
 
 func (r *Room) isDone() bool {
@@ -453,9 +471,10 @@ func (r *Room) handle(c Command) bool {
 	case CmdEffectWave:
 		if c.Gen == r.phaseGen {
 			progress := r.phaseProgress()
-			gap := waveGap(progress, r.phaseDurationMs())
-			r.applyEffectWave(r.state.Phase, progress, waveEffectDuration(gap))
-			r.armWave(r.phaseGen, gap)
+			// Each victim's effect kind, severity, strike time and lifetime are
+			// rolled per-player inside applyEffectWave.
+			r.applyEffectWave(r.state.Phase, progress)
+			r.armWave(r.phaseGen, nextWaveGap(progress, r.phaseDurationMs()))
 		}
 	case cmdTestReadDrawing:
 		if c.probe != nil {

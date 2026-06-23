@@ -41,9 +41,13 @@ export type Powerup =
   | "shuffle"
   | "hidenames";
 
-// An active effect inflicted on this client by a Frenzy effect wave.
+// An active effect inflicted on this client by a Frenzy effect wave. startsAt is
+// when it begins striking (unix ms): the server staggers it into the near future
+// so the hit lands at an unpredictable moment, and the client only renders the
+// effect once startsAt has passed. Absent/0 means strike immediately.
 export interface ActiveEffect {
   kind: Powerup;
+  startsAt?: number;
   endsAt: number;
 }
 
@@ -89,6 +93,10 @@ export interface GameState {
   drawMs?: number;
   guessMs?: number;
   phaseEndsAt?: number;
+  // Frozen at game end so the results banner names the real champion regardless of
+  // who leaves the results screen afterwards.
+  winner?: string;
+  winnerScore?: number;
   // Server clock at the moment this state was sent (unix ms). Used to correct the
   // countdown for device clock skew so every client agrees on the time left.
   serverNow?: number;

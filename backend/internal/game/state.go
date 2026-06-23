@@ -100,13 +100,16 @@ type Reveal struct {
 	Prompt string `json:"prompt"` // the word they were asked to draw
 }
 
-// ActiveEffect is a Frenzy effect currently inflicted on a player: which effect
-// and when it expires (unix ms, absolute). Effects arrive in room-wide waves
-// rather than from a specific attacker. Stored per-player, redacted to that
-// player only.
+// ActiveEffect is a Frenzy effect currently inflicted on a player: which effect,
+// when it starts striking, and when it expires (unix ms, absolute). Each wave
+// rolls effects per-player and staggers their StartsAt into the near future, so a
+// hit lurks then strikes at an unpredictable moment rather than landing the
+// instant the wave fires. StartsAt == 0 means strike immediately (back-compat).
+// Stored per-player, redacted to that player only.
 type ActiveEffect struct {
-	Kind   Powerup `json:"kind"`
-	EndsAt int64   `json:"endsAt"`
+	Kind     Powerup `json:"kind"`
+	StartsAt int64   `json:"startsAt,omitempty"`
+	EndsAt   int64   `json:"endsAt"`
 }
 
 // PoolDrawing is one anonymized candidate in flipped guessing: a stable per-round
@@ -153,6 +156,11 @@ type GameState struct {
 	DrawMs       int      `json:"drawMs"`
 	GuessMs      int      `json:"guessMs"`
 	PhaseEndsAt  int64    `json:"phaseEndsAt"` // unix ms a timed phase ends; 0 if untimed
+	// Winner/WinnerScore are frozen at game end (see endGame) so the final results
+	// banner names the actual champion even after they (or others) leave the
+	// results screen — the live roster shrinks as people go, but this does not.
+	Winner      string `json:"winner,omitempty"`
+	WinnerScore int    `json:"winnerScore,omitempty"`
 
 	// Authoritative round data — persisted (server-side) but redacted from views.
 	Categories    []string                  `json:"categories,omitempty"`    // active prompt pool
@@ -288,6 +296,8 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		DrawMs:       g.DrawMs,
 		GuessMs:      g.GuessMs,
 		PhaseEndsAt:  g.PhaseEndsAt,
+		Winner:       g.Winner,
+		WinnerScore:  g.WinnerScore,
 		You:          name,
 		Closed:       g.Closed,
 	}
@@ -347,6 +357,13 @@ func (g *GameState) viewFor(name string, present map[string]*presence) GameState
 		if name == g.Host {
 			v.Gallery = make(map[string][]Stroke, len(g.Drawings))
 			for artist, strokes := range g.Drawings {
+				// Skip blank lock-ins: there's nothing to show, and copying an
+				// empty slice via append([]Stroke(nil), …) yields a nil slice that
+				// marshals to JSON null — which crashes clients reading its length
+				// (e.g. the local drawing-history saver).
+				if len(strokes) == 0 {
+					continue
+				}
 				v.Gallery[artist] = append([]Stroke(nil), strokes...)
 			}
 			// Tell the host which artists have been revealed so far THIS round, so

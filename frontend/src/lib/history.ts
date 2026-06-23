@@ -146,11 +146,14 @@ export function historyPngName(
   return slug ? `${base}-${slug}.png` : `${base}.png`;
 }
 
+// Defaults ON: by default every device archives everyone's revealed art so any
+// player can browse the whole game in History (not just the host). Only an
+// explicit opt-out ("0") turns it off.
 export function getSaveGalleryPref(): boolean {
   try {
-    return localStorage.getItem(PREF_KEY) === "1";
+    return localStorage.getItem(PREF_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -199,7 +202,7 @@ export function buildSavedGame(input: BuildInput): SavedGame | null {
 
   const mine: Record<number, SavedDrawing> = {};
   for (const [rStr, strokes] of Object.entries(myDrawings)) {
-    if (!strokes.length) continue;
+    if (!strokes?.length) continue;
     mine[Number(rStr)] = { prompt: "", strokes, thumb: thumb(strokes) };
   }
 
@@ -212,7 +215,7 @@ export function buildSavedGame(input: BuildInput): SavedGame | null {
         // The host's own art is already stored in `mine`; never duplicate it
         // into the gallery.
         if (artist === you) continue;
-        if (!strokes.length) continue;
+        if (!strokes?.length) continue;
         roundMap[artist] = { prompt: "", strokes, thumb: thumb(strokes) };
       }
       if (Object.keys(roundMap).length) acc[Number(rStr)] = roundMap;

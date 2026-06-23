@@ -62,9 +62,12 @@ export function FlippedGuessing({
         </p>
       ) : (
         <EffectLayer effects={effects} className="min-h-0 flex-1">
+          {/* pt-5 leaves room above the top row so each tile's tape strip can
+              overhang the tile's top edge (onto the page) instead of being
+              clipped inside it — the realistic "taped to the wall" look. */}
           <ul
             key={`pool-${featureIndex}`}
-            className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto p-1 sm:grid-cols-3 lg:grid-cols-4"
+            className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-auto px-1 pt-5 pb-1 sm:grid-cols-3 lg:grid-cols-4"
           >
             {shuffled.map((d, i) => (
               <li key={d.id}>
@@ -72,10 +75,14 @@ export function FlippedGuessing({
                   type="button"
                   disabled={!onPick}
                   onClick={() => onPick?.(d.id)}
-                  className="card-arcade card-hover card-press pop tape block aspect-4/3 w-full overflow-hidden p-1"
+                  className="card-arcade card-hover card-press pop tape block aspect-4/3 w-full p-1"
                   style={{ "--d": `${i * 35}ms` } as React.CSSProperties}
                 >
-                  <StrokesView strokes={d.strokes} className="h-full w-full" />
+                  {/* inner wrapper keeps the doodle clipped to rounded corners
+                      now that the tile itself no longer hides its overflow. */}
+                  <span className="block h-full w-full overflow-hidden rounded-lg">
+                    <StrokesView strokes={d.strokes} className="h-full w-full" />
+                  </span>
                 </button>
               </li>
             ))}

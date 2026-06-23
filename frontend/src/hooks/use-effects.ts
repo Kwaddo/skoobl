@@ -17,7 +17,10 @@ export function useActiveEffects(): Set<Powerup> {
   }, [effects]);
 
   const t = serverTime();
-  const active = effects.filter((e) => e.endsAt > t);
+  // An effect is active only inside its [startsAt, endsAt) window. startsAt is in
+  // the near future when a wave first arrives — the hit lurks, then strikes — so
+  // this filter is what makes the timing land unexpectedly mid-stroke.
+  const active = effects.filter((e) => (e.startsAt ?? 0) <= t && e.endsAt > t);
   // `kinds` is a stable primitive key: the Set reference only changes when the
   // sorted list of active effect kinds changes. This intentionally omits `active`
   // from the dep array because we want identity stability across sub-second ticks.

@@ -66,7 +66,7 @@ function tap(canvas: HTMLElement, pointerId: number) {
 }
 
 describe("DrawingCanvas client-first", () => {
-  it("streams a moved stroke live via onDraftReplace (throttled, not per point)", () => {
+  it("syncs a completed moved stroke via the cheap onDraftAppend, never a live replace", () => {
     const onDraftAppend = vi.fn();
     const onDraftReplace = vi.fn();
     render(
@@ -77,12 +77,13 @@ describe("DrawingCanvas client-first", () => {
     );
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     drawAStroke(canvas);
-    // A stroke that moves is still growing, so it can't be appended — it syncs as
-    // a full replace. The replace carries the whole strokes array (one stroke),
-    // not one emit per point.
-    expect(onDraftReplace).toHaveBeenCalled();
-    expect(onDraftReplace.mock.calls.at(-1)?.[0]).toHaveLength(1);
-    expect(onDraftAppend).not.toHaveBeenCalled();
+    // The stroke is only synced on pointer-up, by which point it's complete, so it
+    // appends as a single new stroke. There is NO mid-stroke full replace — that
+    // re-serialized the whole (growing) strokes array every ~120ms and is what
+    // made a long drawing get laggier the more was on the canvas.
+    expect(onDraftAppend).toHaveBeenCalled();
+    expect(onDraftAppend.mock.calls.at(-1)?.[0]).toHaveLength(1);
+    expect(onDraftReplace).not.toHaveBeenCalled();
   });
 
   it("flushes a pure tap via the cheap onDraftAppend, not a replace", () => {
@@ -113,17 +114,51 @@ describe("DrawingCanvas client-first", () => {
         />,
       );
       const canvas = document.querySelector("canvas") as HTMLCanvasElement;
-      drawAStroke(canvas); // stroke A streams via replace; synced count -> 1
+      drawAStroke(canvas); // stroke A appends on pointer-up; synced count -> 1
       vi.advanceTimersByTime(200); // let the throttle settle
       tap(canvas, 2); // stroke B (a tap) appends
       vi.advanceTimersByTime(200);
-      // The append must carry ONLY the new stroke, proving sync bookkeeping didn't
-      // re-send (or drop) the already-streamed stroke A.
-      expect(onDraftAppend).toHaveBeenCalled();
+      // Each append must carry ONLY its new stroke, proving sync bookkeeping didn't
+      // re-send (or drop) the already-synced stroke A.
+      expect(onDraftReplace).not.toHaveBeenCalled();
+      expect(onDraftAppend).toHaveBeenCalledTimes(2);
       expect(onDraftAppend.mock.calls.at(-1)?.[0]).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("splits a very long continuous stroke into bounded segments (no unbounded growth)", () => {
+    const onDraftAppend = vi.fn();
+    render(<DrawingCanvas onDraftAppend={onDraftAppend} />);
+    const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    fireEvent.pointerDown(canvas, {
+      isPrimary: true,
+      clientX: 0,
+      clientY: 0,
+      pointerId: 1,
+    });
+    // Drive far more points than the segment cap (1000) without lifting the pen —
+    // jsdom has no getCoalescedEvents, so each move adds exactly one point.
+    for (let i = 0; i < 1200; i++) {
+      fireEvent.pointerMove(canvas, {
+        isPrimary: true,
+        clientX: i % 100,
+        clientY: i % 80,
+        pointerId: 1,
+      });
+    }
+    fireEvent.pointerUp(canvas, {
+      isPrimary: true,
+      clientX: 0,
+      clientY: 0,
+      pointerId: 1,
+    });
+    const strokes = onDraftAppend.mock.calls.at(-1)?.[0] as { points: unknown[] }[];
+    // The one gesture became multiple bounded strokes instead of a single
+    // ever-growing one, and no segment exceeds the cap (+1 carried seam point).
+    expect(strokes.length).toBeGreaterThan(1);
+    for (const s of strokes) expect(s.points.length).toBeLessThanOrEqual(1001);
   });
 
   it("clear reports an empty draft via onDraftReplace", () => {
