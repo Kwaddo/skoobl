@@ -331,20 +331,17 @@ export function DrawingCanvas({
   };
 
   return (
-    // The canvas is a fixed-aspect (4:3) box. On a phone it stacks: the canvas
-    // fills the width up to a hard cap (max-w) with the toolbar in a row beneath.
-    // On a real workspace — landscape (short) or desktop (lg) — it becomes two
-    // panes: the canvas beside a narrow vertical tool rail, so the controls and
-    // Lock-in sit alongside the art instead of stranded below a wall of dead
-    // space. Both are height-bound (the canvas fills the available height, width
-    // follows from the aspect) so the canvas + rail stay a single centered group
-    // with no internal gap. lg caps the height (max-h) so on a tall monitor the
-    // canvas can't grow wide enough to overrun the rail. ↓ short tuned at 760px.
-    <div className="flex h-full min-h-0 flex-col items-stretch justify-center gap-3 short:flex-row short:justify-center short:gap-4 lg:flex-row lg:justify-center lg:gap-6">
-      <div className="flex min-h-0 w-full items-center justify-center short:h-full short:w-auto short:flex-1 lg:h-full lg:w-auto lg:shrink-0">
+    // One column at every size: the canvas fills the available height and a single
+    // bottom bar (tools + Lock-in) sits beneath it. The canvas is a fixed-aspect
+    // (4:3) box that fits its slot both ways — width-driven in portrait, height-
+    // driven in landscape — so it never overflows the bar. The bar is shrink-0, so
+    // it's pinned: the canvas (flex-1) is what gives up space when the screen is
+    // cramped, never the Lock-in button.
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex min-h-0 flex-1 items-center justify-center">
         <EffectLayer
           effects={effects}
-          className="aspect-4/3 w-full max-w-132 rounded-2xl short:h-full short:w-auto short:max-w-none lg:h-full lg:w-auto lg:max-h-124 lg:max-w-none"
+          className="mx-auto aspect-4/3 w-full max-h-full rounded-2xl landscape:h-full landscape:w-auto landscape:max-w-full"
         >
           <canvas
             ref={ref}
@@ -363,13 +360,13 @@ export function DrawingCanvas({
       </div>
 
       {!disabled && (
-        <div className="flex shrink-0 flex-col gap-3 short:w-44 short:justify-center short:overflow-y-auto lg:w-64 lg:justify-center">
-          {/* The control cluster is always a single horizontal row — never a
-              column — so it reads the same everywhere: tools left-to-right above
-              the Lock-in. It only wraps in the cramped landscape (short) rail,
-              which is too narrow for one row. Every control is a fixed 36px
-              square; the lg rail is sized to fit the whole row (5 × 36 + gaps). */}
-          <div className="flex flex-nowrap items-center justify-center gap-2 short:flex-wrap lg:gap-1.5">
+        <div className="flex shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
+          {/* One bottom action bar at every size: the tool cluster and the Lock-in
+              sit together, centered — tools then button, close, not flung to
+              opposite edges. Stacked full-width on a narrow phone. The bar is
+              shrink-0 so it stays pinned while the canvas above flexes; Lock-in is
+              never pushed below the fold. Every control is a fixed 36px square. */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
             {/* Color — a swatch that opens a popover of presets plus a custom
                 picker, so common colors are one tap but anything is reachable. */}
             <div className="relative shrink-0" ref={colorRef}>
@@ -523,7 +520,7 @@ export function DrawingCanvas({
             </ToolButton>
           </div>
 
-          {footer && <div className="shrink-0">{footer}</div>}
+          {footer && <div className="sm:shrink-0">{footer}</div>}
         </div>
       )}
     </div>
