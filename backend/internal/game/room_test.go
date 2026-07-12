@@ -2044,3 +2044,64 @@ func TestAppendBoundedStrokesCapsTotalPoints(t *testing.T) {
 		t.Fatalf("combined points %d exceeds cap %d", total, maxPointsTotal)
 	}
 }
+
+func TestHostKicksPlayer(t *testing.T) {
+	r := NewRoom("kick01")
+	go r.Run()
+	defer r.Stop()
+
+	hostSub := make(chan GameState, 32)
+	joinSpec(t, r, "tv", hostSub)
+	nextState(t, hostSub)
+
+	aliceSub := make(chan GameState, 32)
+	joinOK(t, r, "alice", aliceSub)
+	bobSub := make(chan GameState, 32)
+	joinOK(t, r, "bob", bobSub)
+	drain(aliceSub)
+	drain(bobSub)
+	drain(hostSub)
+
+	// A non-host cannot kick.
+	r.Submit(Command{Kind: CmdKick, Player: "alice", Target: "bob"})
+	if s := poke(t, r, hostSub); len(s.Players) != 2 {
+		t.Fatalf("players = %d after non-host kick, want 2", len(s.Players))
+	}
+
+	// The host kicks bob.
+	drain(bobSub)
+	drain(hostSub)
+	r.Submit(Command{Kind: CmdKick, Player: "tv", Target: "bob"})
+
+	// bob's own next frame is flagged Kicked.
+	if s := nextState(t, bobSub); !s.Kicked {
+		t.Fatal("bob's frame not flagged Kicked")
+	}
+
+	// The host sees bob gone and no Kicked flag on its own frame.
+	got := poke(t, r, hostSub)
+	if s := got; s.Kicked {
+		t.Fatal("host frame should not be flagged Kicked")
+	}
+	names := map[string]bool{}
+	for _, p := range got.Players {
+		names[p.Name] = true
+	}
+	if names["bob"] || !names["alice"] {
+		t.Fatalf("roster = %v, want alice only", names)
+	}
+
+	// Kicking the host or an unknown player is a no-op.
+	r.Submit(Command{Kind: CmdKick, Player: "tv", Target: "tv"})
+	r.Submit(Command{Kind: CmdKick, Player: "tv", Target: "ghost"})
+	if s := poke(t, r, hostSub); len(s.Players) != 1 {
+		t.Fatalf("players = %d after no-op kicks, want 1", len(s.Players))
+	}
+
+	// bob can rejoin (no ban).
+	rejoin := make(chan GameState, 32)
+	joinOK(t, r, "bob", rejoin)
+	if s := poke(t, r, hostSub); len(s.Players) != 2 {
+		t.Fatalf("players = %d after rejoin, want 2", len(s.Players))
+	}
+}

@@ -82,7 +82,7 @@ export function HistoryTab() {
         </button>
       </div>
 
-      <ul className="flex max-h-[50vh] flex-col gap-4 overflow-auto pr-1">
+      <ul className="flex flex-col gap-4">
         {games.map((g) => (
           <li key={g.id} className="card-arcade flex flex-col gap-3 p-3">
             <div className="flex items-center justify-between">

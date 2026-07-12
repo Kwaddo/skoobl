@@ -16,6 +16,7 @@ const (
 	CmdSubmitGuess   MsgType = "submitGuess"
 	CmdNextPhase     MsgType = "nextPhase"
 	CmdLeave         MsgType = "leave"
+	CmdKick          MsgType = "kick"
 )
 
 // Events (server → client).

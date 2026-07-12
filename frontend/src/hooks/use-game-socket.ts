@@ -84,6 +84,7 @@ export function useGameSocket(
     nextPhase: useCallback(() => emit("nextPhase"), [emit]),
     returnToLobby: useCallback(() => emit("returnToLobby"), [emit]),
     leave: useCallback(() => emit("leave"), [emit]),
+    kick: useCallback((name: string) => emit("kick", { target: name }), [emit]),
     submitDrawing: useCallback(
       (strokes: Stroke[]) => emit("submitDrawing", { strokes }),
       [emit],

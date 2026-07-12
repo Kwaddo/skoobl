@@ -197,6 +197,10 @@ type GameState struct {
 	// Closed is the final frame the room sends when the host leaves: the room is
 	// gone and clients should kick everyone back to the main menu.
 	Closed bool `json:"closed,omitempty"`
+	// Kicked is set only on the single frame the room sends to a player the host
+	// removed, so that one client returns to the menu. It is per-recipient (set
+	// in broadcast, never copied by viewFor) and never persisted.
+	Kicked bool `json:"kicked,omitempty"`
 }
 
 func newGameState(code string) GameState {

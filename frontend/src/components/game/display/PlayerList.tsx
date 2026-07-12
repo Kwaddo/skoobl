@@ -10,11 +10,14 @@ const GridItem = memo(
     player,
     host,
     index,
+    onKick,
   }: {
     player: Player;
     host: string;
     index: number;
+    onKick?: (name: string) => void;
   }) {
+    const kickable = !!onKick && player.name !== host;
     return (
       <li
         className="card-arcade card-hover pop flex items-center gap-3 p-3"
@@ -24,7 +27,7 @@ const GridItem = memo(
           name={player.name}
           className="h-10 w-10 -rotate-3 rounded-xl border-2 border-foreground"
         />
-        <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span dir="auto" className="truncate font-bold">
             {player.name}
           </span>
@@ -37,17 +40,35 @@ const GridItem = memo(
             </span>
           )}
         </span>
+        {kickable && (
+          <button
+            type="button"
+            aria-label={`Remove ${player.name}`}
+            title={`Remove ${player.name}`}
+            onClick={() => onKick?.(player.name)}
+            className="shrink-0 rounded-lg border-2 border-foreground px-2 py-1 font-display text-sm font-black leading-none text-foreground transition hover:bg-foreground hover:text-background"
+          >
+            ✕
+          </button>
+        )}
       </li>
     );
   },
   (prev, next) =>
     prev.player.name === next.player.name &&
     prev.host === next.host &&
-    prev.index === next.index,
+    prev.index === next.index &&
+    prev.onKick === next.onKick,
 );
 
 // PlayerGrid lists everyone in the room (used in the lobby).
-export function PlayerGrid({ players }: { players: Player[] }) {
+export function PlayerGrid({
+  players,
+  onKick,
+}: {
+  players: Player[];
+  onKick?: (name: string) => void;
+}) {
   const host = useGameStore((s) => s.host);
   if (players.length === 0) {
     return (
@@ -65,7 +86,13 @@ export function PlayerGrid({ players }: { players: Player[] }) {
     // scrolling parent, so rotating/lifting tiles never clip against its edges.
     <ul className="grid grid-cols-2 gap-3 p-1.5 sm:grid-cols-3">
       {players.map((p, i) => (
-        <GridItem key={p.name} player={p} host={host} index={i} />
+        <GridItem
+          key={p.name}
+          player={p}
+          host={host}
+          index={i}
+          onKick={onKick}
+        />
       ))}
     </ul>
   );

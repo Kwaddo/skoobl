@@ -77,6 +77,9 @@ func bind(h *hub.Hub, sock *socket.Socket) {
 		})
 	})
 	sock.On("leave", func(...any) { c.leaveRoom() })
+	sock.On("kick", func(args ...any) {
+		c.submit(game.Command{Kind: game.CmdKick, Target: stringField(args, "target")})
+	})
 	sock.On("disconnect", func(...any) { c.onDisconnect() })
 }
 
