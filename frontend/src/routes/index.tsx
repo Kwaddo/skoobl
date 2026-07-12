@@ -1,8 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { HistoryTab } from "@/components/history/HistoryTab";
+import { Sparkle } from "@/components/game/icons";
 import { Segmented } from "@/components/Segmented";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LATEST_VERSION } from "@/components/updates/changelog";
+import { InfoDialog } from "@/components/updates/InfoDialog";
+import {
+  hasUnseenUpdate,
+  rememberSeenVersion,
+} from "@/components/updates/seen-version";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { API_BASE } from "@/lib/config";
 import { takeFlash } from "@/lib/flash";
@@ -15,7 +21,10 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-type Tab = "join" | "host" | "history";
+type Tab = "join" | "host";
+
+// Which panel the info popup opens on when the header button is pressed.
+type InfoPanel = "history" | "updates";
 
 // Marquee phrase (with a trailing separator so the repeated copies chain cleanly).
 const TICKER = "draw • guess • laugh • win • ";
@@ -44,6 +53,10 @@ function Home() {
   // Host mode: "screen" ⇒ the host is the shared big screen (doesn't play);
   // "play" ⇒ the host joins the game as a player too.
   const [hostMode, setHostMode] = useState<HostMode>("screen");
+  const [unseen, setUnseen] = useState(hasUnseenUpdate);
+  // The info popup (saved History + What's-new changelog). null ⇒ closed;
+  // otherwise the panel it opened on.
+  const [info, setInfo] = useState<InfoPanel | null>(null);
   const navigate = useNavigate();
   // The big-screen host mode needs a real shared screen, so on phones (mobile)
   // only Play-along is offered. The Host tab itself is always shown. Tracked live
@@ -108,11 +121,35 @@ function Home() {
     setError(null);
   };
 
+  // Marks the latest release seen and clears the "unseen" dot, called when the
+  // popup's What's-new panel is shown.
+  const markUpdatesSeen = () => {
+    rememberSeenVersion(LATEST_VERSION);
+    setUnseen(false);
+  };
+
   return (
     // The page locks to the viewport and centres the form when it fits; on a
     // short screen the inner column grows past the viewport and this scrolls, so
     // the whole form stays reachable on any height.
     <main className="grain-above relative h-dvh w-full overflow-y-auto overflow-x-hidden">
+      <div className="fixed left-5 top-5 z-10">
+        <button
+          type="button"
+          onClick={() => setInfo(unseen ? "updates" : "history")}
+          className="btn-ghost relative h-9 w-9 shrink-0 p-0"
+          title="History & what's new"
+          aria-label="Open history and what's new"
+        >
+          <Sparkle className="mx-auto h-4 w-4" />
+          {unseen && (
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface bg-primary"
+            />
+          )}
+        </button>
+      </div>
       <div className="fixed right-5 top-5 z-10">
         <ThemeToggle />
       </div>
@@ -155,8 +192,9 @@ function Home() {
           className="ink-block crop-marks rise flex flex-col gap-6 p-6 sm:p-8"
           style={{ "--d": "90ms" } as React.CSSProperties}
         >
-          {/* tabs — phones get short labels (Join · Host · History); Host opens
-              the play-along flow there (big-screen mode is gated to ≥sm below) */}
+          {/* tabs — just the two core flows; History and What's-new live in the
+              header-button popup. Host opens the play-along flow on phones
+              (big-screen mode is gated to ≥sm below) */}
           <Segmented
             value={tab}
             onChange={(v) => switchTab(v)}
@@ -165,12 +203,10 @@ function Home() {
                 ? [
                     { value: "join" as const, label: "Join" },
                     { value: "host" as const, label: "Host" },
-                    { value: "history" as const, label: "History" },
                   ]
                 : [
                     { value: "join" as const, label: "Join a room" },
                     { value: "host" as const, label: "Host a game" },
-                    { value: "history" as const, label: "History" },
                   ]
             }
             itemClassName="flex-1 px-4 py-2.5 text-sm font-bold"
@@ -182,9 +218,7 @@ function Home() {
             key={tab}
             className="rise flex min-h-44 flex-col justify-center gap-6"
           >
-            {tab === "history" ? (
-              <HistoryTab />
-            ) : tab === "join" ? (
+            {tab === "join" ? (
               <>
                 <label className="flex flex-col gap-2">
                   <span className="font-mono text-xs uppercase tracking-widest text-muted">
@@ -263,24 +297,22 @@ function Home() {
             )}
           </div>
 
-          {tab !== "history" && (
-            <button
-              type="button"
-              className="btn-key w-full px-6 py-4 text-lg"
-              onClick={tab === "host" ? host : join}
-              disabled={busy}
-            >
-              {tab === "host"
-                ? busy
-                  ? "Creating room…"
-                  : effectiveHostMode === "play"
-                    ? "Host & play"
-                    : "Host a game"
-                : busy
-                  ? "Joining…"
-                  : "Join room"}
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn-key w-full px-6 py-4 text-lg"
+            onClick={tab === "host" ? host : join}
+            disabled={busy}
+          >
+            {tab === "host"
+              ? busy
+                ? "Creating room…"
+                : effectiveHostMode === "play"
+                  ? "Host & play"
+                  : "Host a game"
+              : busy
+                ? "Joining…"
+                : "Join room"}
+          </button>
 
           {error && (
             <p className="rise flex items-center justify-center gap-2 rounded-xl border-2 border-foreground bg-surface-2 px-4 py-3 text-center text-sm font-bold text-foreground">
@@ -310,6 +342,13 @@ function Home() {
           no app · no signup · just a code
         </p>
       </div>
+
+      <InfoDialog
+        open={info !== null}
+        initialPanel={info ?? "history"}
+        onClose={() => setInfo(null)}
+        onViewUpdates={markUpdatesSeen}
+      />
     </main>
   );
 }

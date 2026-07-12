@@ -152,7 +152,7 @@ function HostLobby({ actions }: { actions: GameActions }) {
             </span>
           }
         >
-          <PlayerGrid players={players} />
+          <PlayerGrid players={players} onKick={actions.kick} />
         </Panel>
       </div>
 

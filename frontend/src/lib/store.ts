@@ -94,6 +94,7 @@ interface GameStore {
   revealed: string[];
   roundFeatured: string[];
   closed: boolean;
+  kicked: boolean;
   yourEffects: ActiveEffect[];
   notices: Notice[];
   self: string;
@@ -143,6 +144,7 @@ const initial = {
   revealed: [] as string[],
   roundFeatured: [] as string[],
   closed: false,
+  kicked: false,
   yourEffects: [] as ActiveEffect[],
   notices: [] as Notice[],
   self: "",
@@ -169,7 +171,7 @@ export const useGameStore = create<GameStore>((set) => ({
         .map((p) => p.name)
         .filter((n) => !nextNames.has(n));
       const notices = [...prev.notices];
-      if (!s.closed) {
+      if (!s.closed && !s.kicked) {
         for (const n of departed) {
           notices.push({ id: ++noticeSeq, text: `${n} left the room` });
         }
@@ -217,6 +219,7 @@ export const useGameStore = create<GameStore>((set) => ({
         revealed: s.revealed ?? [],
         roundFeatured: s.roundFeatured ?? [],
         closed: s.closed ?? false,
+        kicked: s.kicked ?? false,
         yourEffects: s.yourEffects ?? [],
         notices,
       };

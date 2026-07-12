@@ -16,6 +16,7 @@ const (
 	CmdJoin CmdKind = iota
 	CmdDisconnect
 	CmdLeave           // player: leave the room now (immediate removal, no grace)
+	CmdKick            // host: remove a player from the lobby (immediate, no ban)
 	CmdConfigure       // host: set rounds/categories/language/timers (lobby only)
 	CmdStart           // host: lobby → drawing (requires minPlayers)
 	CmdSubmitDrawing   // player: lock in strokes during the drawing phase
@@ -131,6 +132,7 @@ type subscriber struct {
 type Command struct {
 	Kind      CmdKind
 	Player    string
+	Target    string         // kick: the player to remove
 	Subscribe chan GameState // join: per-client broadcast channel
 	Spectator bool           // join: true for the host display (non-playing TV)
 	AsHost    bool           // join: true for a playing host (a player who owns the room)
@@ -161,6 +163,7 @@ type Room struct {
 	cmds     chan Command
 	done     chan struct{}
 	subs     []subscriber
+	kicked   string // transient: the name whose next broadcast frame is flagged Kicked
 	snap     Snapshotter
 	present  map[string]*presence
 	host     *presence // the single host-display (spectator); nil until one joins
@@ -421,6 +424,8 @@ func (r *Room) handle(c Command) bool {
 		r.disconnect(c)
 	case CmdLeave:
 		r.leave(c)
+	case CmdKick:
+		r.kick(c)
 	case CmdPrune:
 		r.prune(c)
 	case CmdReapIfEmpty:
