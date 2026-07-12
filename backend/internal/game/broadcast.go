@@ -38,11 +38,27 @@ func (r *Room) unsubscribe(ch chan GameState) {
 func (r *Room) broadcast() {
 	for _, s := range r.subs {
 		view := r.state.viewFor(s.name, r.present)
+		if r.kicked != "" && s.name == r.kicked {
+			view.Kicked = true
+		}
 		select {
 		case s.ch <- view:
 		default: // drop for a slow/closed subscriber rather than block the room
 		}
 	}
+}
+
+// unsubscribeByName drops every subscriber registered under name (mirrors
+// unsubscribe, which drops by channel identity). Runs in the room goroutine, so
+// r.subs is touched by nothing else and stays race-free.
+func (r *Room) unsubscribeByName(name string) {
+	kept := r.subs[:0]
+	for _, s := range r.subs {
+		if s.name != name {
+			kept = append(kept, s)
+		}
+	}
+	r.subs = kept
 }
 
 // persist writes the current state to the Snapshotter. Nil-safe; save errors

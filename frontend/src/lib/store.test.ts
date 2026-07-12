@@ -129,3 +129,35 @@ describe("useGameStore myDrawings / gallery", () => {
     expect(useGameStore.getState().gallery.ann).toHaveLength(1);
   });
 });
+
+// base is a minimal valid broadcast; tests override only the fields they care
+// about. (GameState is the server-state type in ./protocol — it has no
+// separate "ServerState" export.)
+const base = (over: Partial<GameState>): GameState =>
+  ({ code: "abc", phase: "lobby", host: "tv", players: [], ...over }) as GameState;
+
+describe("store kicked handling", () => {
+  beforeEach(() => {
+    useGameStore.setState({ players: [], notices: [], kicked: false });
+  });
+
+  it("exposes the kicked flag from a broadcast", () => {
+    useGameStore.getState().applyState(base({ kicked: true }));
+    expect(useGameStore.getState().kicked).toBe(true);
+  });
+
+  it("defaults kicked to false when absent", () => {
+    useGameStore.getState().applyState(base({}));
+    expect(useGameStore.getState().kicked).toBe(false);
+  });
+
+  it("suppresses the 'left' notice on the frame that kicks this client", () => {
+    useGameStore.setState({
+      players: [{ name: "alice" }, { name: "bob" }],
+    });
+    // This client is bob being kicked: the roster loses bob and kicked is set.
+    useGameStore.getState().applyState(base({ players: [{ name: "alice" }], kicked: true }));
+    const texts = useGameStore.getState().notices.map((n) => n.text);
+    expect(texts.some((t) => t.includes("left the room"))).toBe(false);
+  });
+});

@@ -42,6 +42,7 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
   const error = useGameStore((s) => s.error);
   const phase = useGameStore((s) => s.phase);
   const closed = useGameStore((s) => s.closed);
+  const kicked = useGameStore((s) => s.kicked);
   const storeHost = useGameStore((s) => s.host);
   const hostPlays = useGameStore((s) => s.hostPlays);
   // I own the room if I joined as the host, or I've been promoted to host (the
@@ -88,6 +89,14 @@ export function GameStage({ code, screen }: { code: string; screen: Screen }) {
     setFlash({ message: "The host left — the game ended.", tab: "join" });
     navigate({ to: "/" });
   }, [closed, navigate]);
+
+  // The host removed this player from the lobby: return to the menu with a
+  // one-shot message in the home banner. (The player may rejoin freely.)
+  useEffect(() => {
+    if (!kicked) return;
+    setFlash({ message: "The host removed you from the room.", tab: "join" });
+    navigate({ to: "/" });
+  }, [kicked, navigate]);
 
   // Recoverable join rejections (name taken, wrong code, room full, …) shouldn't
   // hijack the whole screen. Bounce back to the home form with a small inline

@@ -210,6 +210,30 @@ func (r *Room) leave(c Command) {
 	r.removePlayer(c.Player)
 }
 
+// kick removes a player at the host's request from the lobby. It is the host's
+// counterpart to leave: the victim is dropped immediately (no grace) and gets a
+// final frame flagged Kicked so their client returns to the menu. Lobby-only by
+// design, so none of removePlayer's in-game bounce/phase-completion paths run
+// here. No ban is recorded — a kicked player may rejoin.
+func (r *Room) kick(c Command) {
+	if c.Player != r.state.Host || r.state.Phase != PhaseLobby {
+		return
+	}
+	target := c.Target
+	if target == r.state.Host || r.state.playerIndex(target) < 0 {
+		return // never kick the host or a non-player
+	}
+	// Flag the victim's own frame Kicked, send it, then clear the flag so the
+	// trailing roster-removal broadcast carries nothing.
+	r.kicked = target
+	r.broadcast()
+	r.kicked = ""
+	// Drop the victim's subscription so the removal broadcast (and any later
+	// frame) skips them, then remove them from presence and the roster.
+	r.unsubscribeByName(target)
+	r.removePlayer(target)
+}
+
 // hostDeparted handles the host leaving for good (an explicit leave, or gone past
 // the disconnect grace). Instead of ending the room, it hands control to another
 // connected player: that player becomes a *playing* host (HostPlays=true), so the
