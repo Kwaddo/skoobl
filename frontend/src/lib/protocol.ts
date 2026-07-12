@@ -121,6 +121,9 @@ export interface GameState {
   roundFeatured?: string[];
   // Final frame sent when the host leaves: the room is gone, kick to the menu.
   closed?: boolean;
+  // Final frame sent to a player the host removed: kick to the menu, but the
+  // room itself lives on for everyone else.
+  kicked?: boolean;
   // Frenzy-mode recipient-specific field: effects currently inflicted on this
   // client by the room-wide effect waves.
   yourEffects?: ActiveEffect[];
